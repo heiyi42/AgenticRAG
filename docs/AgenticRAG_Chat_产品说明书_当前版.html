@@ -1,0 +1,983 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>AgenticRAG Chat 产品说明书</title>
+  <style>
+    body {
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: #1f2937;
+      line-height: 1.65;
+      margin: 36px;
+    }
+    h1, h2, h3 {
+      color: #0f172a;
+      margin-top: 1.2em;
+      margin-bottom: 0.4em;
+    }
+    h1 {
+      font-size: 24px;
+      text-align: center;
+      margin-bottom: 0.2em;
+    }
+    h2 {
+      font-size: 18px;
+      border-bottom: 1px solid #d1d5db;
+      padding-bottom: 4px;
+    }
+    h3 {
+      font-size: 15px;
+    }
+    p, li {
+      font-size: 12px;
+    }
+    .meta {
+      text-align: center;
+      color: #475569;
+      margin-bottom: 24px;
+      font-size: 11px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 18px;
+      font-size: 11px;
+    }
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f8fafc;
+    }
+    .note {
+      color: #475569;
+    }
+    code {
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      background: #f8fafc;
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+    .figure {
+      margin: 18px 0 14px;
+      text-align: center;
+    }
+    .figure img {
+      max-width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      background: #ffffff;
+    }
+    .figure-note {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #475569;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 11px;
+      line-height: 1.55;
+      color: #334155;
+    }
+  </style>
+</head>
+<body>
+  <h1>AgenticRAG Chat 产品说明书</h1>
+  <div class="meta">
+    版本：当前实现说明版（2026-04-14 修订）<br>
+    适用对象：产品、研发、测试、交付、课程演示与答辩<br>
+    说明：本文基于当前仓库实现快照编写，用于描述已落地能力与当前边界，不代表尚未上线的规划项。
+  </div>
+
+  <h2>1. 产品概述</h2>
+  <p>
+    AgenticRAG Chat 是一个面向课程知识库场景的 Web 端学习辅助系统，当前围绕三门固定课程构建：
+    C语言、操作系统、网络安全实验。系统核心目标不是做开放域聊天，而是把“课程语料检索、学科化回答结构、
+    题目辅导、C 代码分析、多轮会话”整合成一个更适合教学场景的问答入口。
+  </p>
+  <p>
+    当前版本已经不再是单一的课程问答页面，而是形成了三条并行能力线：
+    普通课程问答、题目辅导与过程化解题、C 代码分析。用户在同一聊天界面中即可完成概念提问、步骤化做题和代码排错。
+  </p>
+
+  <h2>2. 本次修订重点</h2>
+  <ul>
+    <li>补入当前已落地的 <strong>题目辅导模块</strong>，说明其显式触发方式、题库能力和规则求解覆盖范围。</li>
+    <li>补入当前已落地的 <strong>C 代码分析模块</strong>，说明编译检查、静态分析、结构提取与受限执行边界。</li>
+    <li>补入统一 Web 编排层与底层 LightRAG 检索内核的架构图。</li>
+    <li>把三大模块改成三个独立大标题，便于按模块做答辩与技术讲解。</li>
+    <li>更新后端接口说明，明确当前消息发送主接口为 <code>/api/chats/&lt;chat_id&gt;/messages/stream</code> 流式接口。</li>
+  </ul>
+
+  <h2>3. 产品定位与边界</h2>
+  <p>
+    产品定位：一个服务于课程教学和学习辅导的学科化智能助手，而不是开放域通用聊天产品。
+  </p>
+  <ul>
+    <li>面向固定课程知识库，强调课程口径、章节结构、可教学性和稳定性。</li>
+    <li>优先回答课程相关问题；对范围外问题，系统可走免检索直答，但不承诺课程知识库依据。</li>
+    <li>网络安全实验内容仅面向课程教学、授权实验环境、靶场和受控演示环境，不面向真实未授权目标。</li>
+    <li>C 代码分析用于教学和排错辅助，不等价于任意代码执行平台或通用在线评测系统。</li>
+  </ul>
+
+  <h2>4. 目标用户与典型场景</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>用户类型</th>
+        <th>主要诉求</th>
+        <th>典型场景</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>学生</td>
+        <td>理解概念、做题、看代码、准备实验</td>
+        <td>“指针是什么”“这道银行家算法怎么做”“这段 C 代码为什么段错误”</td>
+      </tr>
+      <tr>
+        <td>助教 / 教师</td>
+        <td>快速生成结构化讲解、课堂补充说明、实验答疑口径</td>
+        <td>“把页面置换过程讲清楚”“给实验现象分析模板”</td>
+      </tr>
+      <tr>
+        <td>课程建设与测试人员</td>
+        <td>验证知识库覆盖、路由效果、题目辅导和代码分析能力</td>
+        <td>测试三学科题目、跨学科问题、异常输入与边界情况</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>5. 当前支持范围</h2>
+  <h3>5.1 学科范围</h3>
+  <ul>
+    <li>C语言知识库</li>
+    <li>操作系统知识库</li>
+    <li>网络安全实验知识库</li>
+  </ul>
+
+  <h3>5.2 模式范围</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>模式</th>
+        <th>定位</th>
+        <th>适用问题</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Auto</td>
+        <td>默认模式，自动平衡检索深度、学科路由与回答成本</td>
+        <td>大多数常规课程问答</td>
+      </tr>
+      <tr>
+        <td>Instant</td>
+        <td>偏快速回答与结构化返回</td>
+        <td>定义题、简答题、单点概念解释</td>
+      </tr>
+      <tr>
+        <td>DeepSearch</td>
+        <td>偏完整度和覆盖面</td>
+        <td>复杂机制题、跨章节题、需要完整展开的题目</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>5.3 请求类型范围</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>请求类型</th>
+        <th>触发方式</th>
+        <th>当前状态</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>普通课程问答</td>
+        <td>直接在输入框提问</td>
+        <td>已上线，默认主链路</td>
+      </tr>
+      <tr>
+        <td>题目辅导</td>
+        <td>前端点击“题目辅导”，或 API 显式传入 <code>problem_tutoring: true</code></td>
+        <td>已上线，当前以显式触发为主</td>
+      </tr>
+      <tr>
+        <td>C 代码分析</td>
+        <td>前端“代码分析”入口，或用户直接粘贴 C 代码触发自动识别</td>
+        <td>已上线，当前仅面向 C 代码</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>6. 核心功能说明</h2>
+  <h3>6.1 多轮会话与会话管理</h3>
+  <ul>
+    <li>支持新建聊天、查看聊天、删除聊天、固定聊天、重命名聊天。</li>
+    <li>支持会话标题自动生成，并通过事件流异步刷新标题。</li>
+    <li>支持多轮上下文延续，后端具备摘要记忆与本地轮次裁剪能力。</li>
+    <li>用户历史消息支持复制，以及在前端编辑后重新发送。</li>
+    <li>回答以流式方式逐步展示，用户可在生成过程中停止回答。</li>
+  </ul>
+  <p class="note">
+    说明：后端存在“清空会话”接口能力，但当前主前端界面主要暴露的是新建、固定、重命名、删除等操作。
+  </p>
+
+  <h3>6.2 学科选择</h3>
+  <p>前端提供四个学科选项：自动、C语言、操作系统、网络安全实验。</p>
+  <ul>
+    <li>学科为“自动”时，系统根据问题内容决定是否单学科或跨学科处理。</li>
+    <li>用户手动指定某一学科后，系统优先只使用该学科知识库，不主动扩展到其他学科。</li>
+    <li>当前若用户手动将学科切换为“操作系统”，回答语言将切换为 English。</li>
+    <li>当前学科选择主要作为前端当前聊天偏好使用，不是后端持久化的聊天字段。</li>
+  </ul>
+
+  <h3>6.3 Auto 模式与路由策略</h3>
+  <p>
+    Auto 模式当前采用“检索网关 + 学科路由 + 模式内编排”的组合策略。系统会先判断问题是否需要进入课程知识库，
+    再决定主学科、是否跨学科以及是否需要更深的检索链路。
+  </p>
+  <ul>
+    <li>对范围外问题、寒暄和可直接回答的问题，系统可直接走免检索直答。</li>
+    <li>对课程问题，系统会优先进入对应知识库，并按照学科回答骨架组织答案。</li>
+    <li>当问题复杂或跨学科时，系统可在 Auto 内部升级为多学科整合或更深的回答链路。</li>
+    <li>Auto 当前强调“单学科优先、能直答则不强检索、能快答则不无故深搜”。</li>
+  </ul>
+
+  <h3>6.4 普通课程问答</h3>
+  <p>
+    普通课程问答仍是产品主链路，适合概念解释、机制说明、知识点比较、章节总结、实验原理说明等场景。
+    当前回答遵循“学科决定骨架，模式决定展开层级”的设计。
+  </p>
+  <ul>
+    <li>C语言：偏“结论、核心概念、代码示例、运行过程、易错点”。</li>
+    <li>操作系统：偏“结论、本质、机制、图示化理解、对比、考试表达”。</li>
+    <li>网络安全实验：偏“实验目标、实验环境、原理、步骤、结果观察、结论”。</li>
+  </ul>
+
+  <h3>6.5 题目辅导与过程化解题</h3>
+  <p>
+    题目辅导模块是当前版本的重要增强能力，主要解决“这道题怎么做、条件怎么抽取、过程怎么写、还能练什么题”
+    等解题型请求。当前版本以显式触发为主，即用户点击前端“题目辅导”按钮，或接口显式传入
+    <code>problem_tutoring: true</code>。
+  </p>
+  <p>模块当前能力包括：</p>
+  <ul>
+    <li>题型识别：按三学科识别题目类型、目标、关键条件与知识点。</li>
+    <li>模板化讲解：按题型组织“题型判断、条件抽取、过程说明、结论、易错点、类题方向”。</li>
+    <li>题库检索：当前题库文件位于 <code>data/tutoring_question_bank/questions.jsonl</code>，共 300 道题，每科 100 道。</li>
+    <li>类题推荐：返回同学科、同题型、相近知识点题目，作为继续练习入口。</li>
+    <li>few-shot 示例：系统会把相似题的解法摘要压入 prompt，提升解题回答稳定性。</li>
+    <li>混合推荐：词面检索不足时，可回退到题库 embedding 索引进行补充推荐。</li>
+  </ul>
+
+  <h3>6.6 C 代码分析</h3>
+  <p>
+    C 代码分析模块用于教学排错和代码阅读。前端在学科选择为 C语言 时提供专用“代码分析”入口；此外，
+    后端也支持在普通输入框中根据代码块自动识别 C 代码分析请求。
+  </p>
+  <ul>
+    <li>代码提取：从用户消息中提取 fenced code block 或高置信度 C 代码片段。</li>
+    <li>编译检查：识别编译错误与警告。</li>
+    <li>静态分析：在编译器支持时输出静态风险项。</li>
+    <li>结构提取：在 clang 可用时提取 AST 结构；不支持时回退到轻量结构提取。</li>
+    <li>受限执行：仅当编译成功且代码满足安全条件时，才尝试短时执行。</li>
+  </ul>
+
+  <h3>6.7 范围外问题处理</h3>
+  <p>
+    当前知识库只覆盖三类固定课程语料。对于超出范围的问题，系统会优先采用免检索直答，而不是强行从课程知识库中拼接答案。
+  </p>
+  <ul>
+    <li>范围外问题不承诺课程知识库依据。</li>
+    <li>范围外问题可返回通用说明，但不代表课程标准答案。</li>
+    <li>如果用户需要课程口径结果，应手动选择对应学科并提出课程相关问题。</li>
+  </ul>
+
+  <h2>7. 推荐使用流程</h2>
+  <h3>7.1 普通问答</h3>
+  <ol>
+    <li>进入页面后直接新建聊天。</li>
+    <li>默认保持 Auto；若问题明确属于某一门课，可手动切换学科。</li>
+    <li>直接提问，系统会按流式方式返回答案。</li>
+    <li>若结果不够完整，可切换为 DeepSearch 重新提问。</li>
+  </ol>
+
+  <h3>7.2 题目辅导</h3>
+  <ol>
+    <li>先输入完整题干、关键条件、代码片段或实验现象。</li>
+    <li>点击“题目辅导”按钮，显式进入分步解题链。</li>
+    <li>等待系统输出题型、过程、结论、易错点和类题推荐。</li>
+  </ol>
+
+  <h3>7.3 C 代码分析</h3>
+  <ol>
+    <li>将学科切换到 C语言。</li>
+    <li>点击“代码分析”并粘贴完整 C 代码，或直接在主输入框中贴代码提问。</li>
+    <li>系统优先返回编译错误、警告、静态风险、结构信息和修改建议。</li>
+    <li>若满足执行条件，系统可附带受限执行结果。</li>
+  </ol>
+
+  <h2>8. 前端交互说明</h2>
+  <ul>
+    <li>左侧侧边栏用于展示聊天列表，支持新建、固定、重命名、删除。</li>
+    <li>顶部提供模式选择与学科选择。</li>
+    <li>主区域展示消息流；回答支持 Markdown 渲染与流式输出。</li>
+    <li>底部输入区提供普通发送、“题目辅导”按钮，以及在 C语言 学科下显示的“代码分析”按钮。</li>
+    <li>系统通过 <code>/api/events/chat-updates</code> 推送标题更新事件，前端可在会话首次提问后异步刷新标题。</li>
+  </ul>
+
+  <h2>9. 主要接口说明</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>接口</th>
+        <th>方法</th>
+        <th>说明</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>/</code></td>
+        <td>GET</td>
+        <td>首页与聊天界面</td>
+      </tr>
+      <tr>
+        <td><code>/api/modes</code></td>
+        <td>GET</td>
+        <td>获取模式列表</td>
+      </tr>
+      <tr>
+        <td><code>/api/chats</code></td>
+        <td>GET / POST</td>
+        <td>聊天列表获取 / 创建聊天</td>
+      </tr>
+      <tr>
+        <td><code>/api/chats/&lt;chat_id&gt;</code></td>
+        <td>GET / DELETE / POST</td>
+        <td>获取聊天详情 / 删除聊天</td>
+      </tr>
+      <tr>
+        <td><code>/api/chats/&lt;chat_id&gt;/delete</code></td>
+        <td>POST</td>
+        <td>删除聊天的兼容别名接口</td>
+      </tr>
+      <tr>
+        <td><code>/api/chats/&lt;chat_id&gt;/mode</code></td>
+        <td>POST</td>
+        <td>设置聊天模式</td>
+      </tr>
+      <tr>
+        <td><code>/api/chats/&lt;chat_id&gt;/pin</code></td>
+        <td>POST</td>
+        <td>固定 / 取消固定聊天</td>
+      </tr>
+      <tr>
+        <td><code>/api/chats/&lt;chat_id&gt;/rename</code></td>
+        <td>POST</td>
+        <td>重命名聊天</td>
+      </tr>
+      <tr>
+        <td><code>/api/chats/&lt;chat_id&gt;/clear</code></td>
+        <td>POST</td>
+        <td>清空聊天内容</td>
+      </tr>
+      <tr>
+        <td><code>/api/chats/&lt;chat_id&gt;/messages/stream</code></td>
+        <td>POST</td>
+        <td>消息发送主接口，基于 SSE 流式返回 <code>meta / delta / done</code> 事件</td>
+      </tr>
+      <tr>
+        <td><code>/api/events/chat-updates</code></td>
+        <td>GET</td>
+        <td>聊天更新事件流，当前主要用于标题异步刷新</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="note">
+    当前版本以流式消息接口为主，未单独暴露稳定的非流式 <code>/messages</code> 问答接口作为主前端入口。
+  </p>
+
+  <h2>10. 关键请求参数与返回语义</h2>
+  <ul>
+    <li><code>mode</code>：<code>auto</code> / <code>instant</code> / <code>deepsearch</code>。</li>
+    <li><code>subjects</code>：显式学科数组，例如 <code>["C_program"]</code>。</li>
+    <li><code>code_analysis</code>：显式请求代码分析。</li>
+    <li><code>problem_tutoring</code> 或 <code>tutoring</code>：显式请求题目辅导。</li>
+    <li><code>stream_chunk_size</code>：流式分片大小。</li>
+  </ul>
+  <p>
+    返回事件中会包含 <code>request_kind</code>、<code>retrieval_used</code>、<code>retrieval_gate_reason</code>、
+    <code>subject_route</code>、<code>assistant_meta</code> 等元信息，用于前端提示当前回答所走链路。
+  </p>
+
+  <h2>11. 数据、存储与配置</h2>
+  <h3>11.1 会话与持久化</h3>
+  <ul>
+    <li>聊天会话默认持久化到 <code>./data/web_chats.json</code>。</li>
+    <li>当前能力应被理解为“本地会话持久化”，不应被描述为云端多端同步。</li>
+    <li>会话状态包含聊天元数据、消息记录、轮次信息和摘要记忆状态。</li>
+  </ul>
+
+  <h3>11.2 知识库存储</h3>
+  <ul>
+    <li>三学科工作目录位于 <code>./storage/C_program</code>、<code>./storage/operating_systems</code>、<code>./storage/cybersec_lab</code>。</li>
+    <li>系统启动时会尝试预热各学科知识库。</li>
+  </ul>
+
+  <h3>11.3 题库与 embedding 索引</h3>
+  <ul>
+    <li>题库主文件：<code>./data/tutoring_question_bank/questions.jsonl</code></li>
+    <li>题库 embedding 索引：<code>./data/tutoring_question_bank/questions.embedding_index.json</code></li>
+    <li>相关开关由 <code>QUESTION_BANK_EMBED_ENABLED</code> 等环境变量控制。</li>
+  </ul>
+
+  <h3>11.4 关键环境变量</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>配置项</th>
+        <th>作用</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>OPENAI_API_KEY</code> / <code>OPENAI_BASE_URL</code></td>
+        <td>大模型调用配置</td>
+      </tr>
+      <tr>
+        <td><code>WEB_HOST</code> / <code>WEB_PORT</code></td>
+        <td>Web 服务地址与端口</td>
+      </tr>
+      <tr>
+        <td><code>WEB_ENABLE_SUMMARY_MEMORY</code></td>
+        <td>是否启用摘要记忆</td>
+      </tr>
+      <tr>
+        <td><code>WEB_ENABLE_CODE_ANALYSIS</code></td>
+        <td>是否启用 C 代码分析</td>
+      </tr>
+      <tr>
+        <td><code>WEB_ENABLE_CODE_EXECUTION</code></td>
+        <td>是否允许满足条件的受限代码执行</td>
+      </tr>
+      <tr>
+        <td><code>WEB_ENABLE_PROBLEM_TUTORING</code></td>
+        <td>是否启用题目辅导模块</td>
+      </tr>
+      <tr>
+        <td><code>WEB_ENABLE_RETRIEVAL_GATE</code></td>
+        <td>是否启用检索网关</td>
+      </tr>
+      <tr>
+        <td><code>WEB_STORAGE_ROOT</code></td>
+        <td>知识库存储根目录</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>12. 当前技术架构</h2>
+  <ul>
+    <li>前端：单页 Web 界面，位于 <code>templates/chat.html</code>，负责会话交互、模式与学科切换、流式渲染。</li>
+    <li>后端入口：<code>webapp.py</code>，基于 Flask 提供页面与 API。</li>
+    <li>核心编排：<code>webapp_core/chat_service.py</code> 聚合路由、流式输出、检索支持、Auto 编排、题目辅导与代码分析能力。</li>
+    <li>会话层：<code>webapp_core/session_store.py</code> 负责会话状态、本地持久化与摘要记忆快照。</li>
+    <li>题目辅导：<code>webapp_core/problem_tutoring_service.py</code> 负责题型识别、题库推荐、规则求解与过程化提示构造。</li>
+    <li>代码分析：<code>webapp_core/code_analysis_service.py</code> 负责 C 代码提取、编译检查、静态分析、结构提取与受限执行。</li>
+    <li>知识库层：底层使用分学科 working_dir 维护索引与检索状态。</li>
+  </ul>
+
+  <h3>12.1 Agent 架构图</h3>
+  <div class="figure">
+    <img src="AgenticRAG_Agent_Architecture.svg.png" alt="AgenticRAG Chat Agent 架构图">
+    <div class="figure-note">统一 Web 编排层负责请求分流与会话管理，底层 LightRAG 检索内核负责分学科检索与证据组织。</div>
+  </div>
+
+  <h3>12.2 总体执行链</h3>
+  <pre>用户输入
+-> /api/chats/&lt;chat_id&gt;/messages/stream
+-> ChatStreamingMixin.build_chat_message_stream_handler
+-> 请求识别：code_analysis / problem_tutoring / smalltalk / retrieval_gate
+-> 学科路由：requested_subjects 或 decide_subject_route
+-> 普通课程问答 / 题目辅导 / C 代码分析 三条支路
+-> 产出 SSE 事件：meta / delta / done
+-> SessionStore 持久化消息、标题与摘要记忆状态
+-> 前端增量渲染并刷新聊天列表</pre>
+
+  <h2>13. 普通课程问答模块</h2>
+  <h3>13.1 模块定位</h3>
+  <p>
+    普通课程问答模块是系统默认主链路，对应“直接提问并获得课程化回答”的使用方式。它同时承担三类任务：
+    判断是否应该进入课程知识库、识别属于哪个学科或是否跨学科，以及在 Auto / Instant / DeepSearch
+    三种模式下选择合适的检索与回答策略。
+  </p>
+
+  <h3>13.2 核心组件</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>组件 / 文件</th>
+        <th>职责</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>webapp_core/chat_streaming.py</code></td>
+        <td>消息主入口，解析请求参数，建立 SSE 事件流，决定先走哪条支路。</td>
+      </tr>
+      <tr>
+        <td><code>webapp_core/chat_routing.py</code></td>
+        <td>负责检索网关、学科路由、显式学科锁定和路由缓存。</td>
+      </tr>
+      <tr>
+        <td><code>webapp_core/chat_auto_orchestration.py</code></td>
+        <td>负责 Auto 模式预算划分、快速回答、充分性评审、第二学科补充和升级到 DeepSearch。</td>
+      </tr>
+      <tr>
+        <td><code>webapp_core/chat_retrieval_support.py</code></td>
+        <td>负责 Instant / DeepSearch / 跨学科合成 / 题目辅导支撑方法。</td>
+      </tr>
+      <tr>
+        <td><code>agenticRAG/instant_answer.py</code>、<code>agenticRAG/agentic_answer.py</code></td>
+        <td>底层统一 helper 入口，分别承载单跳检索和深度检索的非流式调用。</td>
+      </tr>
+      <tr>
+        <td><code>agenticRAG/agentic_runtime.py</code></td>
+        <td>维护 LightRAG 实例池、embedding 配置、tokenizer 和按学科 working_dir 取库逻辑。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>13.3 入口判定与分流逻辑</h3>
+  <ol>
+    <li>前端把 <code>message</code>、<code>mode</code>、<code>subjects</code> 等字段提交到流式接口。</li>
+    <li>服务端先做高优先级识别：先看是否命中 C 代码分析，再看是否显式点击了题目辅导。</li>
+    <li>若都未命中，再判断是否属于寒暄/小型直答，最后才进入检索网关。</li>
+    <li>检索网关输出 <code>need_retrieval</code>、<code>confidence</code>、<code>kb_relevance</code>、<code>direct_answerability</code>。</li>
+    <li>若无需检索，则直接走免检索直答；若需要检索，则进入学科路由和模式编排。</li>
+  </ol>
+
+  <h3>13.4 学科路由与学科锁定</h3>
+  <ul>
+    <li>若用户显式选择了学科，<code>normalize_requested_subjects</code> 会把别名统一成 <code>C_program</code>、<code>operating_systems</code>、<code>cybersec_lab</code>，随后直接锁定该学科。</li>
+    <li>若用户未显式选择学科，系统先用关键词快路径做粗路由；置信度不足时，再调用结构化 LLM 路由器输出三学科分数。</li>
+    <li>学科路由结果包含 <code>primary_subject</code>、<code>cross_subject</code>、<code>confidence</code>、<code>ranked</code> 等字段，供后续模式编排使用。</li>
+    <li>当前若手动选择“操作系统”，上层会附加英文回答约束，因此底层仍查操作系统库，但最终答案语言切换为 English。</li>
+  </ul>
+
+  <h3>13.5 Auto / Instant / DeepSearch 的技术实现</h3>
+  <p>
+    这三种模式名称看起来像并列关系，但在当前实现里并不完全对称。DeepSearch 是一条多阶段深度检索链；
+    Instant 是一条单跳检索链；Auto 则位于两者之上，负责“先快答、再评审、必要时升级”的编排。
+  </p>
+
+  <h3>13.5.1 Instant 链路</h3>
+  <p>
+    当前 Instant 相关实现主要分成“非流式 helper 入口”和“流式 helper 入口”两类：
+  </p>
+  <ul>
+    <li>底层非流式 Instant helper：<code>answer_instant()</code> 会先做一次路由，再进入单跳查询，适合 CLI 或非 SSE 场景。</li>
+    <li>流式 Instant helper：<code>answer_instant_stream()</code> 会先做一次路由，再进入单跳流式查询，返回 <code>response_iterator</code> 供 SSE 增量输出。</li>
+    <li>当前主 Web 显式 Instant 与 Auto 内部 Instant 都复用了这条 <code>answer_instant_stream()</code> helper。</li>
+  </ul>
+  <p>
+    也就是说，当前 Instant 的差异点主要是“是否需要流式输出”，而不是 Web 和 Auto 各自维护一套不同的查询逻辑。
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Instant 节点 / 函数</th>
+        <th>作用</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>route_query_mode_async</code></td>
+        <td>根据问题选择 <code>local</code>、<code>global</code>、<code>hybrid</code> 之一。适合事实定位时偏 local，整体脉络时偏 global，综合问题时偏 hybrid。</td>
+      </tr>
+      <tr>
+        <td><code>answer_instant_stream</code></td>
+        <td>流式 Instant 包装器：先异步路由，再向 LightRAG 发起流式查询，返回 <code>response_iterator</code> 供 SSE 增量输出。当前 Web / Auto 的主流式 Instant 都走这一支。</td>
+      </tr>
+      <tr>
+        <td><code>_run_multi_subject_instant_stream</code></td>
+        <td>Web 层单学科 Instant 包装器：负责学科样式提示、thread_id 学科隔离和 route 元数据回填。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>显式 Instant 的典型执行顺序可以概括为：</p>
+  <pre>显式 Instant
+-> _stream_mode_with_retrieval(mode="instant")
+-> _run_multi_subject_instant_stream
+-> ask_instant_mode_stream
+-> answer_instant_stream
+-> route_query_mode_async
+-> LightRAG aquery_llm(mode="route_result", stream=True)
+-> 返回 answer / query_status / response_iterator</pre>
+
+  <p>底层非流式 Instant helper 的执行顺序是：</p>
+  <pre>Instant helper
+-> route_query_mode_async
+-> LightRAG aquery_llm(mode="route_result")
+-> answer / elapsed_ms / query_status</pre>
+
+  <h3>13.5.2 Auto 链路</h3>
+  <p>
+    Auto 不是独立知识库查询器，而是“上层编排器”。它基于学科路由结果，决定应该先走快速链还是直接深搜，
+    以及在快速链返回之后是否需要评审、补第二学科或升级到 DeepSearch。
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Auto 节点 / 函数</th>
+        <th>作用</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>_plan_auto_route</code></td>
+        <td>根据学科路由结果生成 Auto 执行计划，输出 <code>auto_subjects</code>、<code>deep_subjects</code>、<code>complexity</code>、<code>route_chain</code>、<code>route_policy</code> 等字段。</td>
+      </tr>
+      <tr>
+        <td><code>_start_speculative_auto_secondary_query</code></td>
+        <td>若存在第二学科且配置允许，则后台投机性启动第二学科 Instant 查询，为后续补充整合争取时间。</td>
+      </tr>
+      <tr>
+        <td><code>_ask_instant_stream</code></td>
+        <td>执行 Auto 的主学科快速查询。它走的是 <code>answer_instant_stream()</code>，会先路由再查询。</td>
+      </tr>
+      <tr>
+        <td><code>_instant_heuristic_assessment</code></td>
+        <td>对 Instant 结果做第一层启发式充分性判断，例如是否为空、是否像失败信息、长度是否足够。</td>
+      </tr>
+      <tr>
+        <td><code>_should_review_instant_answer</code> / <code>_review_instant_answer</code></td>
+        <td>决定是否触发 LLM 评审，并由结构化 LLM 判断回答是否足以覆盖用户问题。</td>
+      </tr>
+      <tr>
+        <td><code>_run_multi_subject_auto_instant_stream</code></td>
+        <td>当主学科结果不足且存在第二学科时，取第二学科结果并做跨学科整合与充分性复评。</td>
+      </tr>
+      <tr>
+        <td><code>_run_auto_deep_stream</code></td>
+        <td>在预算允许时升级到 DeepSearch，并控制 deep 预算上限。</td>
+      </tr>
+      <tr>
+        <td><code>_stream_auto_mode</code></td>
+        <td>Auto 总控函数，串联计划、主链查询、评审、补充整合和升级逻辑。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>Auto 的典型执行顺序可以概括为：</p>
+  <pre>Auto
+-> _plan_auto_route
+-> 判断 route_chain 是 instant 还是 deep
+-> 若 instant:
+   -> _start_speculative_auto_secondary_query（可选）
+   -> _ask_instant_stream（主学科）
+   -> _instant_heuristic_assessment
+   -> _should_review_instant_answer / _review_instant_answer
+   -> 若不足且有第二学科:
+      -> _run_multi_subject_auto_instant_stream
+   -> 若仍不足且预算足够:
+      -> _run_auto_deep_stream
+-> 若 deep:
+   -> _run_auto_deep_stream
+-> 返回 mode_used / upgraded / upgrade_reason / route / instant_review</pre>
+
+  <p>
+    因此 Auto 更像“策略层 Agent”。它并不直接触碰 LightRAG，而是调用 Instant 或 DeepSearch 支路，并根据回答质量继续调度。
+  </p>
+
+  <h3>13.5.3 DeepSearch 链路与节点功能</h3>
+  <p>
+    DeepSearch 是当前最完整的一条检索链。它先把问题编排成状态，再反复执行“规划 - 检索 - 证据评估 - 重试”，最后才生成最终回答。
+    这一链路主要由 <code>chat_retrieval_support.py</code> 和 <code>agenticRAG/agentic_nodes.py</code> 协同完成。
+  </p>
+
+  <p>Web 层 DeepSearch 执行顺序如下：</p>
+  <pre>DeepSearch
+-> _stream_mode_with_retrieval(mode="deepsearch")
+-> _run_multi_subject_deep_stream
+-> _run_deepsearch_plan_state
+-> build_global_subquestion_plan
+-> route_subquestion_subjects
+-> build_subquery_tasks
+-> query_subquestion_tasks
+-> judge_subquestion_results
+-> prepare_subquestion_retry_plan（若需要）
+-> build_final_answer_prompt
+-> _stream_llm_text 输出最终答案</pre>
+
+  <p>该链路中的关键节点职责如下：</p>
+  <ul>
+    <li><code>build_global_subquestion_plan</code>：先把整题拆成 1 到 5 个全局子问题，此时还不绑定课程知识库。</li>
+    <li><code>route_subquestion_subjects</code>：对子问题逐个做学科路由，得到主学科和候选学科列表。</li>
+    <li><code>build_subquery_tasks</code>：把“子问题”展开成可执行的“子问题-学科”检索任务，并附上 mode、top_k、chunk_top_k。</li>
+    <li><code>query_subquestion_tasks</code>：并发执行所有检索任务，产出带 <code>query_status</code>、<code>query_message</code>、<code>elapsed_ms</code> 的结果表。</li>
+    <li><code>judge_subquestion_results</code>：先按子问题聚合同源证据，再做规则和 LLM 充分性评估，判断当前证据是否足够回答该子问题。</li>
+    <li><code>prepare_subquestion_retry_plan</code>：只对证据不足的子问题做改写、放大召回，必要时扩大学科范围后再重试。</li>
+    <li><code>build_final_answer_prompt</code>：把所有子问题、检索状态、证据充分性、失败原因和结果证据编织成最终回答提示词。</li>
+  </ul>
+  <p>
+    Web 层当前使用的是“公共检索内核 + 自行流式收口”的 DeepSearch 编排，CLI 与 Web 共用同一套核心检索状态机。
+    状态核心字段定义在 <code>agenticRAG/agentic_schema.py</code>，包括
+    <code>sub_questions</code>、<code>subquery_tasks</code>、<code>subquery_results</code>、
+    <code>needs_retry</code>、<code>insufficient_subquestion_ids</code>、<code>final_answer</code> 等。
+  </p>
+
+  <h3>13.6 跨学科整合与输出</h3>
+  <ul>
+    <li>当问题跨学科或主学科回答不足时，系统可以并行查多个学科，再做统一合成。</li>
+    <li>合成阶段不是简单拼接，而是通过专门的“跨学科答案整合器”去重、分层，并做一次充分性评审。</li>
+    <li>最终输出的 SSE 事件会带上 <code>request_kind</code>、<code>retrieval_used</code>、<code>subject_route</code>、<code>assistant_meta</code> 等元信息。</li>
+    <li>回答结束后，消息会落入 <code>SessionStore</code>，并异步触发标题生成与更新事件。</li>
+  </ul>
+
+  <h2>14. 题目辅导模块</h2>
+  <h3>14.1 模块定位</h3>
+  <p>
+    题目辅导模块解决的是“解题型输入”，不是一般知识点解释。它的目标不是只给一个答案，而是把题型判断、条件抽取、
+    过程推导、规则求解、类题推荐和易错点讲解组织成完整的学习输出。
+  </p>
+  <p>
+    当前前端主链路以显式触发为准，即点击“题目辅导”按钮后，服务端才会在
+    <code>_match_problem_tutoring_request</code> 中接受该请求。仓库里的
+    <code>tests/test_chat_streaming.py</code> 也专门覆盖了“未显式点击时不进入题目辅导链”的约束。
+  </p>
+
+  <h3>14.2 核心执行流程</h3>
+  <ol>
+    <li><code>match_request</code>：先判断输入是否像题目，再用规则法生成首个分析结果。</li>
+    <li><code>analyze_question</code>：在规则结果基础上，可选地再调用结构化 LLM 做题型、目标、条件、知识点补全。</li>
+    <li><code>select_template</code>：从模板库中选出匹配题型，例如 <code>c_output</code>、<code>os_page_replacement</code>、<code>os_banker</code>、<code>cybersec_lab_steps</code>。</li>
+    <li><code>recommend_similar_questions_hybrid</code>：先做词面召回，必要时叠加 embedding 索引召回相似题。</li>
+    <li><code>build_few_shot_examples</code>：从相似题中提取标准解法与常见错误，作为 few-shot 示例。</li>
+    <li><code>solve_deterministic</code>：若题型属于已覆盖规则求解器，则先算出确定性结果。</li>
+    <li><code>retrieve_knowledge</code>：到当前学科知识库中补查“规则、公式、步骤依据、定义”。</li>
+    <li><code>build_learning_outline</code> 与 <code>build_final_prompt</code>：整理中间结构并交给 LLM 输出最终教学回答。</li>
+  </ol>
+
+  <h3>14.3 题型识别策略</h3>
+  <ul>
+    <li>规则识别负责快速判定学科、题型、目标和条件，适合页面置换、进程调度、银行家算法、C 输出题等高特征输入。</li>
+    <li>当启用结构化 LLM 解析器时，系统会在规则结果上补充更完整的 <code>knowledge_points</code>、<code>extracted_conditions</code> 和 <code>answer_focus</code>。</li>
+    <li>如果用户手动指定了学科，LLM 分析结果也会被强制校正到该学科，以保证用户锁定行为优先。</li>
+    <li>因此题目辅导不是“纯规则”也不是“纯生成”，而是规则、结构化 LLM 和检索材料的混合链路。</li>
+  </ul>
+
+  <h3>14.4 中间数据结构</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>结构</th>
+        <th>用途</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>TutoringProblemAnalysis</code></td>
+        <td>保存是否题目、学科、题型、置信度、目标、关键条件、知识点和答案组织重点。</td>
+      </tr>
+      <tr>
+        <td><code>ProblemTemplate</code></td>
+        <td>定义题型模板，包括别名、知识关键词、建议步骤、输出栏目、规则求解提示。</td>
+      </tr>
+      <tr>
+        <td><code>solver_result</code></td>
+        <td>记录规则求解器状态、求解器名称、过程步骤和结果字典。</td>
+      </tr>
+      <tr>
+        <td><code>learning_outline</code></td>
+        <td>返回前端可展示的结构化摘要，包含题型标签、推荐步骤、常见错误、类题推荐和检索摘要。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>14.5 题库、few-shot 与 embedding 混合推荐</h3>
+  <ul>
+    <li>题库主文件是 <code>data/tutoring_question_bank/questions.jsonl</code>，embedding 索引是 <code>questions.embedding_index.json</code>。</li>
+    <li>默认先做词面相似度召回；当 top 结果不足够强时，才触发 embedding 召回，避免所有请求都走 embedding 成本。</li>
+    <li>few-shot 示例不会原样照抄整题答案，而是压缩为“解题步骤、答案骨架、常见错误”供最终 prompt 使用。</li>
+    <li>类题推荐返回的是题号、题干摘要、难度和得分，便于用户继续练习。</li>
+  </ul>
+
+  <h3>14.6 规则求解器设计</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>求解器</th>
+        <th>覆盖题型</th>
+        <th>返回内容</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>页面置换求解器</td>
+        <td>FIFO / LRU / OPT / Clock</td>
+        <td>缺页次数、命中次数、缺页率、逐步页框状态。</td>
+      </tr>
+      <tr>
+        <td>进程调度求解器</td>
+        <td>FCFS / SJF / SRTF / RR</td>
+        <td>时间轴、完成时间、周转时间、等待时间和平均指标。</td>
+      </tr>
+      <tr>
+        <td>银行家算法求解器</td>
+        <td>安全性检查 / Request 试分配</td>
+        <td>Need、Work、Finish、安全序列和是否可分配。</td>
+      </tr>
+      <tr>
+        <td>PV 同步结构求解器</td>
+        <td>生产者消费者 / 读者写者 / 前驱关系</td>
+        <td>信号量设计框架、伪代码结构和关键同步点。</td>
+      </tr>
+      <tr>
+        <td>Diffie-Hellman 求解器</td>
+        <td>DH 密钥交换实验题</td>
+        <td>公开值、共享密钥和关键模运算步骤。</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    如果 <code>solver_result.status = success</code>，最终提示词会要求 LLM 优先采用规则结果，不得改写数值结论。
+    这使得计算型题目更像“程序化求解 + 教学讲解”的组合，而不是纯生成式回答。
+  </p>
+
+  <h3>14.7 课程检索与最终提示词组织</h3>
+  <ul>
+    <li><code>retrieve_knowledge</code> 会把题型、知识点和题干压缩成面向课程依据的查询，固定走当前学科知识库的 <code>hybrid</code> 查询。</li>
+    <li>检索结果并不直接返回给用户，而是作为“课程依据材料”注入最终 Prompt。</li>
+    <li>最终 Prompt 会同时看到：题型分析、模板、知识库依据、相似题、few-shot、规则结果和安全边界。</li>
+    <li>因此题目辅导模块本质上是一个多源材料编排器，而不是单次知识库问答。</li>
+  </ul>
+
+  <h2>15. C 代码分析模块</h2>
+  <h3>15.1 模块定位</h3>
+  <p>
+    C 代码分析模块面向“教学排错”和“代码阅读”，强调把工具结果翻译成学生能看懂的解释。
+    它不是在线判题系统，也不是任意代码执行沙箱。当前前端把它约束在 C语言 学科下，并提供专门的“代码分析”按钮。
+  </p>
+
+  <h3>15.2 触发与代码提取</h3>
+  <ul>
+    <li>显式触发：前端传入 <code>code_analysis: true</code>。</li>
+    <li>隐式触发：当用户直接贴入 fenced C 代码块或高置信度 C 代码片段时，后端也可自动识别。</li>
+    <li><code>CodeAnalysisService.extract_c_code_candidate</code> 支持三类提取策略：标准 fenced code、未闭合 fenced code、普通文本中的 C 代码片段。</li>
+    <li>系统会过滤明显非 C 语言提示词，避免把 Python、JavaScript 等代码误送入 C 编译链。</li>
+  </ul>
+
+  <h3>15.3 工具链与分析步骤</h3>
+  <ol>
+    <li>检测编译器：按 <code>clang</code>、<code>gcc</code>、<code>cc</code>、<code>MSVC cl</code> 等顺序寻找可用编译器。</li>
+    <li>编译检查：输出编译错误与警告。</li>
+    <li>静态分析：clang 走 <code>--analyze</code>，gcc 走 <code>-fanalyzer</code>，MSVC 走 <code>/analyze</code>。</li>
+    <li>结构提取：clang 可直接导出 AST JSON；否则使用轻量回退方法从源码抽取函数、声明和基础结构。</li>
+    <li>受限执行：仅在编译成功且满足安全条件时，才构建可执行文件并运行。</li>
+  </ol>
+
+  <h3>15.4 安全执行边界</h3>
+  <ul>
+    <li>代码过长、缺少 <code>main</code>、或命中阻断模式时，直接跳过执行。</li>
+    <li>阻断模式包括：文件与目录操作、外部命令或进程调用、网络 API、交互式输入、潜在越权头文件。</li>
+    <li>执行时使用临时目录，并把 <code>HOME</code>、<code>TMPDIR</code>、<code>TMP</code>、<code>TEMP</code> 指向该目录，减少副作用外溢。</li>
+    <li>执行超时、输出长度和代码长度都受环境变量约束。</li>
+  </ul>
+
+  <h3>15.5 输出结构与教学解释</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>字段</th>
+        <th>含义</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>compile_errors</code></td>
+        <td>编译错误列表。</td>
+      </tr>
+      <tr>
+        <td><code>warnings</code></td>
+        <td>编译器警告。</td>
+      </tr>
+      <tr>
+        <td><code>risk_findings</code></td>
+        <td>静态分析风险项。</td>
+      </tr>
+      <tr>
+        <td><code>structure</code></td>
+        <td>AST 或回退结构提取结果。</td>
+      </tr>
+      <tr>
+        <td><code>execution</code></td>
+        <td>执行资格、构建状态、运行结果、超时情况和阻断原因。</td>
+      </tr>
+      <tr>
+        <td><code>tool_runs</code></td>
+        <td>编译、静态分析、AST、构建、运行五类工具调用的公共摘要。</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    工具分析阶段产出的不是一段字符串，而是一份结构化结果。随后
+    <code>chat_code_analysis.py</code> 会把这份结构化 JSON 再包装成教学解释 Prompt，
+    要求明确区分“编译错误、编译警告、静态风险、代码结构、修改建议、是否真的运行过程序”。
+  </p>
+
+  <h3>15.6 异常与降级策略</h3>
+  <ul>
+    <li>如果没有检测到可用编译器，系统会返回“环境缺少 C 编译器”的说明，而不是误判为用户代码错误。</li>
+    <li>如果编译器不支持 AST，则自动回退到轻量结构分析，不会直接失效。</li>
+    <li>如果代码满足静态分析但不满足执行条件，系统仍会输出编译/结构/风险分析，只是不执行程序。</li>
+    <li>整个链路返回的 <code>route.chain</code> 会标记为 <code>code_analysis</code>，前端据此显示专用加载文案和消息元信息。</li>
+  </ul>
+
+  <h2>16. 安全边界与合规说明</h2>
+  <ul>
+    <li>网络安全实验相关回答仅面向授权实验环境、课堂演示和教学靶场，不应用于真实未授权目标。</li>
+    <li>代码分析模块不会默认执行所有用户代码，只有在满足受限执行条件时才短时运行。</li>
+    <li>涉及扫描、漏洞、利用、命令执行等内容时，产品应默认以课程实验和防护分析语境输出，不应给出面向真实攻击的操作指南。</li>
+  </ul>
+
+  <h2>17. 当前版本局限</h2>
+  <ul>
+    <li>题目辅导当前主要依赖显式触发，尚未把自动识别作为主产品入口。</li>
+    <li>C语言题目的确定性求解仍不完整，复杂代码输出与逻辑推导仍主要依赖 LLM 与代码分析协同。</li>
+    <li>学科选择当前主要存在前端状态中，不是后端持久化聊天字段。</li>
+    <li>当前主前端未完整暴露所有后端管理接口，例如“清空会话”主要体现在 API 层。</li>
+    <li>产品能力边界仍严格限定在三门课程；开放域问题不应被描述为系统核心能力。</li>
+  </ul>
+
+  <h2>18. 验收口径建议</h2>
+  <ul>
+    <li>普通课程问答应在三学科内稳定返回结构化回答，并体现学科化骨架。</li>
+    <li>Auto 模式对明显范围外问题应允许免检索直答，对课程问题应优先进入知识库。</li>
+    <li>题目辅导在显式触发后，应输出题型、过程、结论与类题推荐；规则可解题型应优先采用规则结果。</li>
+    <li>C 代码分析在可用编译器环境下，应区分编译错误、警告、静态风险与执行结果；在编译器缺失环境下，应正确提示环境问题。</li>
+    <li>会话标题、删除、重命名、固定、流式输出等交互应表现清晰且结果可见。</li>
+  </ul>
+
+  <h2>19. 后续演进建议</h2>
+  <ul>
+    <li>将题目辅导从“显式触发优先”逐步扩展到“显式触发 + 高置信自动识别”。</li>
+    <li>补充 C语言 小代码片段的确定性求解器，提高输出题稳定性。</li>
+    <li>将学科选择与更多聊天偏好正式纳入后端会话持久化。</li>
+    <li>在前端增加链路说明面板，展示当前命中的请求类型、学科模板、规则求解与检索网关结果。</li>
+  </ul>
+</body>
+</html>
