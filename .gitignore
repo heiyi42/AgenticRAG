@@ -1,6 +1,7 @@
 .DS_Store
 **/.DS_Store
 
+.vscode/
 .env
 .env.*
 !.env.example
@@ -19,9 +20,8 @@ htmlcov/
 venv/
 env/
 
-data/web_chats.json
-data/web_chats.json.tmp
-data/tutoring_question_bank/*.embedding_index.json
+data/
+lib/
 
 codex_clang_probe.plist
 codex_probe_warn.plist
