@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "agenticrag-learning-assistant"
 version = "0.1.0"
 description = "Agentic RAG learning assistant for C programming, operating systems, and cybersecurity labs."
-readme = "PROJECT_STRUCTURE.md"
+readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
   "Flask>=3.1,<4",
