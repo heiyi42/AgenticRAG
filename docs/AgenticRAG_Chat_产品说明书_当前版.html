@@ -586,8 +586,8 @@
     当前 Instant 相关实现主要分成“非流式 helper 入口”和“流式 helper 入口”两类：
   </p>
   <ul>
-    <li>底层非流式 Instant helper：<code>answer_instant()</code> 会先做一次路由，再进入单跳查询，适合 CLI 或非 SSE 场景。</li>
-    <li>流式 Instant helper：<code>answer_instant_stream()</code> 会先做一次路由，再进入单跳流式查询，返回 <code>response_iterator</code> 供 SSE 增量输出。</li>
+    <li>底层非流式 Instant helper：<code>answer_instant()</code> 固定使用 LightRAG 的 <code>naive</code> 模式做单跳查询，适合 CLI 或非 SSE 场景。</li>
+    <li>流式 Instant helper：<code>answer_instant_stream()</code> 固定使用 LightRAG 的 <code>naive</code> 模式做单跳流式查询，返回 <code>response_iterator</code> 供 SSE 增量输出。</li>
     <li>当前主 Web 显式 Instant 与 Auto 内部 Instant 都复用了这条 <code>answer_instant_stream()</code> helper。</li>
   </ul>
   <p>
@@ -603,12 +603,8 @@
     </thead>
     <tbody>
       <tr>
-        <td><code>route_query_mode_async</code></td>
-        <td>根据问题选择 <code>local</code>、<code>global</code>、<code>hybrid</code> 之一。适合事实定位时偏 local，整体脉络时偏 global，综合问题时偏 hybrid。</td>
-      </tr>
-      <tr>
         <td><code>answer_instant_stream</code></td>
-        <td>流式 Instant 包装器：先异步路由，再向 LightRAG 发起流式查询，返回 <code>response_iterator</code> 供 SSE 增量输出。当前 Web / Auto 的主流式 Instant 都走这一支。</td>
+        <td>流式 Instant 包装器：固定以 <code>mode="naive"</code> 向 LightRAG 发起流式查询，返回 <code>response_iterator</code> 供 SSE 增量输出。当前 Web / Auto 的主流式 Instant 都走这一支。</td>
       </tr>
       <tr>
         <td><code>_run_multi_subject_instant_stream</code></td>
@@ -623,14 +619,12 @@
 -> _run_multi_subject_instant_stream
 -> ask_instant_mode_stream
 -> answer_instant_stream
--> route_query_mode_async
--> LightRAG aquery_llm(mode="route_result", stream=True)
+-> LightRAG aquery_llm(mode="naive", stream=True)
 -> 返回 answer / query_status / response_iterator</pre>
 
   <p>底层非流式 Instant helper 的执行顺序是：</p>
   <pre>Instant helper
--> route_query_mode_async
--> LightRAG aquery_llm(mode="route_result")
+-> LightRAG aquery_llm(mode="naive")
 -> answer / elapsed_ms / query_status</pre>
 
   <h3>13.5.2 Auto 链路</h3>
@@ -657,7 +651,7 @@
       </tr>
       <tr>
         <td><code>_ask_instant_stream</code></td>
-        <td>执行 Auto 的主学科快速查询。它走的是 <code>answer_instant_stream()</code>，会先路由再查询。</td>
+        <td>执行 Auto 的主学科快速查询。它走的是 <code>answer_instant_stream()</code>，固定使用 <code>naive</code> 模式查询。</td>
       </tr>
       <tr>
         <td><code>_instant_heuristic_assessment</code></td>

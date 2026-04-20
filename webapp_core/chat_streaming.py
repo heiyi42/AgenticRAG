@@ -307,16 +307,23 @@ class ChatStreamingMixin:
                     else:
                         subject_route: dict[str, Any] | None = None
                         if explicit_subjects:
-                            subject_route = await self.decide_subject_route(
-                                user_question=question,
-                                augmented_question=augmented_question,
-                                mode=mode,
-                                timeout_s=timeout_s,
-                                requested_subjects=explicit_subjects,
-                            )
                             retrieval_used = True
                             retrieval_gate_confidence = 1.0
                             retrieval_gate_reason = "用户显式指定学科，强制检索"
+                            if mode == "deepsearch":
+                                subject_route_meta = self._build_subject_route_meta(
+                                    self._subject_route_from_explicit_subjects(
+                                        explicit_subjects
+                                    )
+                                )
+                            else:
+                                subject_route = await self.decide_subject_route(
+                                    user_question=question,
+                                    augmented_question=augmented_question,
+                                    mode=mode,
+                                    timeout_s=timeout_s,
+                                    requested_subjects=explicit_subjects,
+                                )
                         elif tutoring_candidate is not None:
                             subject_route = await self.decide_subject_route(
                                 user_question=question,
@@ -328,15 +335,35 @@ class ChatStreamingMixin:
                             retrieval_used = True
                             retrieval_gate_confidence = 1.0
                             retrieval_gate_reason = "用户显式触发题目辅导"
-                        elif (
-                            short_definition_route := self._fast_short_definition_subject_route(
-                                question
-                            )
-                        ) is not None:
-                            subject_route, local_reason = short_definition_route
-                            retrieval_used = True
-                            retrieval_gate_confidence = 1.0
-                            retrieval_gate_reason = local_reason
+                        elif mode == "deepsearch":
+                            if cfg.WEB_ENABLE_RETRIEVAL_GATE:
+                                need_retrieval, gate_conf, gate_reason = (
+                                    await self.decide_need_retrieval(
+                                        subject_ids=list(self.subject_catalog.keys()),
+                                        user_question=question,
+                                        augmented_question=augmented_question,
+                                        mode=mode,
+                                        timeout_s=timeout_s,
+                                        response_language=response_language,
+                                    )
+                                )
+                                retrieval_used = bool(need_retrieval)
+                                retrieval_gate_confidence = float(gate_conf)
+                                retrieval_gate_reason = (
+                                    str(gate_reason or "").strip() or "无"
+                                )
+                                if retrieval_used:
+                                    subject_route_meta = self._fast_subject_route_meta(
+                                        "DeepSearch 跳过请求级学科路由，拆题后对子问题单独路由"
+                                    )
+                                else:
+                                    subject_route_meta = self._fast_subject_route_meta(
+                                        "第一网关判定免检索直答"
+                                    )
+                            else:
+                                subject_route_meta = self._fast_subject_route_meta(
+                                    "DeepSearch 未启用请求级学科路由，拆题后对子问题单独路由"
+                                )
                         elif cfg.WEB_ENABLE_RETRIEVAL_GATE:
                             need_retrieval, gate_conf, gate_reason = (
                                 await self.decide_need_retrieval(
@@ -407,6 +434,7 @@ class ChatStreamingMixin:
                             result = await self._stream_mode_with_retrieval(
                                 mode=mode,
                                 subject_route=subject_route,
+                                requested_subjects=requested_subjects,
                                 user_question=question,
                                 augmented_question=augmented_question,
                                 thread_id=session.chat_id,

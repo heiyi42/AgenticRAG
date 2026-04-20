@@ -126,6 +126,63 @@ class ChatAutoOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(emitted, ["子问题路由后的最终回答"])
 
+    async def test_stream_mode_with_retrieval_deepsearch_uses_all_subjects_without_request_route(self) -> None:
+        service = self._build_service()
+        captured: dict[str, object] = {}
+
+        async def fake_run_multi_subject_deep_stream(**kwargs: object):
+            captured["kwargs"] = dict(kwargs)
+            return {
+                "mode_used": "deepsearch",
+                "answer": "深搜结果",
+            }
+
+        service._run_multi_subject_deep_stream = fake_run_multi_subject_deep_stream  # type: ignore[method-assign]
+
+        result = await service._stream_mode_with_retrieval(
+            mode="deepsearch",
+            subject_route=None,
+            requested_subjects=None,
+            user_question="解释这道综合题",
+            augmented_question="解释这道综合题",
+            thread_id="thread-1",
+            timeout_s=12,
+            response_language="zh",
+        )
+
+        self.assertEqual(result["mode_used"], "deepsearch")
+        self.assertEqual(
+            captured["kwargs"]["subject_ids"],
+            list(service.subject_catalog.keys()),
+        )
+
+    async def test_stream_mode_with_retrieval_deepsearch_honors_explicit_subject_lock(self) -> None:
+        service = self._build_service()
+        captured: dict[str, object] = {}
+
+        async def fake_run_multi_subject_deep_stream(**kwargs: object):
+            captured["kwargs"] = dict(kwargs)
+            return {
+                "mode_used": "deepsearch",
+                "answer": "深搜结果",
+            }
+
+        service._run_multi_subject_deep_stream = fake_run_multi_subject_deep_stream  # type: ignore[method-assign]
+
+        result = await service._stream_mode_with_retrieval(
+            mode="deepsearch",
+            subject_route=None,
+            requested_subjects=["C_program"],
+            user_question="解释指针",
+            augmented_question="解释指针",
+            thread_id="thread-1",
+            timeout_s=12,
+            response_language="zh",
+        )
+
+        self.assertEqual(result["mode_used"], "deepsearch")
+        self.assertEqual(captured["kwargs"]["subject_ids"], ["C_program"])
+
 
 if __name__ == "__main__":
     unittest.main()

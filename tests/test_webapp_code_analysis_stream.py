@@ -122,6 +122,51 @@ class WebappCodeAnalysisStreamTests(unittest.TestCase):
         self.assertFalse(done["retrieval_used"])
         self.assertIn("代码分析", str(done["assistant_meta"]))
 
+    def test_short_definition_question_uses_retrieval_gate_instead_of_forced_retrieval(
+        self,
+    ) -> None:
+        fake_decide_need_retrieval = AsyncMock(
+            return_value=(False, 0.93, "通用短定义，免检索直答")
+        )
+
+        with (
+            patch.object(self.webapp.store, "persist_sessions_safely", return_value=None),
+            patch.object(
+                self.webapp.chat_service,
+                "_schedule_chat_title_refinement",
+                return_value=None,
+            ),
+            patch.object(
+                self.webapp.chat_service,
+                "decide_need_retrieval",
+                new=fake_decide_need_retrieval,
+            ),
+            patch.object(
+                self.webapp.chat_service,
+                "_stream_llm_text",
+                new=AsyncMock(return_value="指针是一个存储地址的变量。"),
+            ),
+        ):
+            response = self.client.post(
+                f"/api/chats/{self.chat_id}/messages/stream",
+                json={
+                    "message": "指针是什么？",
+                    "mode": "auto",
+                    "stream_chunk_size": 48,
+                },
+                buffered=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        events = self._parse_sse_events(response.get_data(as_text=True))
+        done_events = [data for name, data in events if name == "done"]
+        self.assertEqual(len(done_events), 1)
+        done = done_events[0]
+        self.assertFalse(done["retrieval_used"])
+        self.assertEqual(done["route"]["chain"], "direct")
+        self.assertEqual(done["retrieval_gate_reason"], "通用短定义，免检索直答")
+        fake_decide_need_retrieval.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -250,7 +250,7 @@ class ChatAutoOrchestrationMixin:
             subject_id
             for subject_id in subject_ids
             if subject_id in self.subject_catalog
-        ] or ["operating_systems"]
+        ] or list(self.subject_catalog.keys()) or ["operating_systems"]
         primary_subject = normalized_subject_ids[0]
         deep_question = (
             self._apply_answer_style_to_question(
@@ -283,7 +283,8 @@ class ChatAutoOrchestrationMixin:
         self,
         *,
         mode: str,
-        subject_route: dict[str, Any],
+        subject_route: dict[str, Any] | None,
+        requested_subjects: list[str] | None = None,
         user_question: str,
         augmented_question: str,
         thread_id: str,
@@ -291,8 +292,26 @@ class ChatAutoOrchestrationMixin:
         response_language: str = "zh",
         emit_text: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
+        if mode == "deepsearch":
+            deep_subjects = [
+                subject_id
+                for subject_id in (requested_subjects or [])
+                if subject_id in self.subject_catalog
+            ] or list(self.subject_catalog.keys())
+            return await self._run_multi_subject_deep_stream(
+                user_question=user_question,
+                question=augmented_question,
+                thread_id=thread_id,
+                timeout_s=timeout_s,
+                subject_ids=deep_subjects,
+                response_language=response_language,
+                emit_text=emit_text,
+            )
+
+        if subject_route is None:
+            raise ValueError(f"{mode} mode requires subject_route")
+
         instant_subjects = self._subjects_for_instant(subject_route)
-        deep_subjects = self._subjects_for_deep(subject_route)
         if mode == "instant":
             return await self._run_multi_subject_instant_stream(
                 user_question=user_question,
@@ -300,16 +319,6 @@ class ChatAutoOrchestrationMixin:
                 thread_id=thread_id,
                 timeout_s=timeout_s,
                 subject_ids=instant_subjects,
-                response_language=response_language,
-                emit_text=emit_text,
-            )
-        if mode == "deepsearch":
-            return await self._run_multi_subject_deep_stream(
-                user_question=user_question,
-                question=augmented_question,
-                thread_id=thread_id,
-                timeout_s=timeout_s,
-                subject_ids=deep_subjects,
                 response_language=response_language,
                 emit_text=emit_text,
             )
