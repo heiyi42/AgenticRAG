@@ -7,7 +7,7 @@ from queue import Empty, Full, Queue
 from threading import Thread
 from typing import Any, Callable
 
-import models.auto as auto
+from . import auto_runtime as auto
 
 from . import config as cfg
 from .session_store import ChatSession, safe_int

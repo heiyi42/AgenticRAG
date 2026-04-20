@@ -10,10 +10,11 @@
 - `dickens/`: LightRAG working dir / index data
 - `data/`: source text and chat persistence (`web_chats.json`)
 
+## Mode Modules
+- `webapp_core/auto_runtime.py`: Web Auto 模式复用的路由/评审辅助函数与默认参数
+- `webapp_core/config.py`: Web 三种模式的超时与运行配置
+
 ## CLI Tools
-- `models/auto.py`: Auto mode CLI
-- `models/instant.py`: Instant mode CLI
-- `models/deep_search.py`: DeepSearch mode CLI
 - `benchmark_query_modes.py`: mode latency benchmark
 - `run_eval_compare.py`: batch eval runner
 

@@ -5,7 +5,7 @@ import re
 import time
 from typing import Any, Callable
 
-import models.auto as auto
+from . import auto_runtime as auto
 
 from agenticRAG.agentic_answer import run_question_plan_state
 from agenticRAG.agentic_nodes import build_final_answer_prompt

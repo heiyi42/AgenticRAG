@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-import models.auto as auto
+from . import auto_runtime as auto
 from pydantic import BaseModel, Field
 
 from . import config as cfg

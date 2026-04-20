@@ -4,7 +4,7 @@ import asyncio
 import time
 from typing import Any, Callable
 
-import models.auto as auto
+from . import auto_runtime as auto
 
 from . import config as cfg
 

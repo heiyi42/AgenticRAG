@@ -4,7 +4,7 @@ import re
 from threading import Lock
 from typing import Any, Callable
 
-import models.auto as auto
+from . import auto_runtime as auto
 
 from . import config as cfg
 from .chat_auto_orchestration import ChatAutoOrchestrationMixin

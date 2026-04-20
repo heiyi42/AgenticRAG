@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import os
 
-import models.auto as auto
-from models.deep_search import DEEP_QUERY_TIMEOUT_S
-from models.instant import INSTANT_QUERY_TIMEOUT_S
+from . import auto_runtime as auto
 
 WEB_ENABLE_SUMMARY_MEMORY = os.getenv("WEB_ENABLE_SUMMARY_MEMORY", "1").lower() in {
     "1",
@@ -26,6 +24,8 @@ WEB_CHAT_TITLE_TIMEOUT_S = int(os.getenv("WEB_CHAT_TITLE_TIMEOUT_S", "8"))
 WEB_CHAT_RENAME_MAX_LEN = int(os.getenv("WEB_CHAT_RENAME_MAX_LEN", "24"))
 
 AUTO_TIMEOUT_S = int(os.getenv("WEB_AUTO_TIMEOUT_S", str(auto.AUTO_QUERY_TIMEOUT_S)))
+INSTANT_QUERY_TIMEOUT_S = int(os.getenv("INSTANT_QUERY_TIMEOUT_S", "60"))
+DEEP_QUERY_TIMEOUT_S = int(os.getenv("DEEP_QUERY_TIMEOUT_S", "120"))
 AUTO_ROUTE_RATIO = auto._clamp_ratio(
     os.getenv("WEB_AUTO_ROUTE_RATIO", str(auto.AUTO_ROUTE_BUDGET_RATIO)),
     auto.AUTO_ROUTE_BUDGET_RATIO,
