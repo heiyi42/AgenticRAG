@@ -161,6 +161,10 @@ class ChatAutoOrchestrationMixin:
                 "answer": primary_answer,
                 "review_sufficient": True,
                 "review_reason": "单学科无需补充整合",
+                "auto_timings": {
+                    "autoSecondSubjectMs": 0,
+                    "autoMergeReviewMs": 0,
+                },
                 "subject_ids": selected,
                 "route": {
                     "chain": "auto-single-subject-instant",
@@ -170,6 +174,7 @@ class ChatAutoOrchestrationMixin:
                 "raw": {"subject_results": []},
             }
 
+        secondary_started = time.perf_counter()
         secondary_result, secondary_note = await self._resolve_auto_secondary_result(
             user_question=user_question,
             question=question,
@@ -179,6 +184,7 @@ class ChatAutoOrchestrationMixin:
             response_language=response_language,
             secondary_result_task=secondary_result_task,
         )
+        secondary_ms = int((time.perf_counter() - secondary_started) * 1000)
         subject_answers = [
             {
                 "subject_id": selected[0],
@@ -197,6 +203,7 @@ class ChatAutoOrchestrationMixin:
                     "answer": secondary_answer,
                 }
             )
+        merge_started = time.perf_counter()
         merged = await self._stream_synthesize_subject_answers_with_review(
             user_question=user_question,
             mode="auto",
@@ -205,6 +212,7 @@ class ChatAutoOrchestrationMixin:
             response_language=response_language,
             emit_text=emit_text,
         )
+        merge_ms = int((time.perf_counter() - merge_started) * 1000)
         merged_answer = str(merged.get("answer", "")).strip() or str(primary_answer or "").strip()
         review_reason = str(merged.get("reason", "")).strip() or "无"
         if secondary_note and secondary_note not in {
@@ -218,6 +226,10 @@ class ChatAutoOrchestrationMixin:
             "answer": merged_answer,
             "review_sufficient": merged.get("sufficient"),
             "review_reason": review_reason,
+            "auto_timings": {
+                "autoSecondSubjectMs": secondary_ms,
+                "autoMergeReviewMs": merge_ms,
+            },
             "subject_ids": subject_ids[:2],
             "route": {
                 "chain": "auto-dual-subject-instant",
@@ -244,6 +256,7 @@ class ChatAutoOrchestrationMixin:
         subject_ids: list[str],
         response_language: str = "zh",
         emit_text: Callable[[str], None] | None = None,
+        workflow_stage_callback: Callable[[str, dict[str, Any]], Any] | None = None,
     ) -> dict[str, Any]:
         del thread_id
         normalized_subject_ids = [
@@ -270,6 +283,7 @@ class ChatAutoOrchestrationMixin:
             routing_question=question,
             response_language=response_language,
             emit_text=emit_text,
+            workflow_stage_callback=workflow_stage_callback,
         )
         result["subject_ids"] = normalized_subject_ids
         result["route"] = {
@@ -291,6 +305,7 @@ class ChatAutoOrchestrationMixin:
         timeout_s: int,
         response_language: str = "zh",
         emit_text: Callable[[str], None] | None = None,
+        workflow_stage_callback: Callable[[str, dict[str, Any]], Any] | None = None,
     ) -> dict[str, Any]:
         if mode == "deepsearch":
             deep_subjects = [
@@ -306,6 +321,7 @@ class ChatAutoOrchestrationMixin:
                 subject_ids=deep_subjects,
                 response_language=response_language,
                 emit_text=emit_text,
+                workflow_stage_callback=workflow_stage_callback,
             )
 
         if subject_route is None:
@@ -468,11 +484,19 @@ class ChatAutoOrchestrationMixin:
         emit_text: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         started = time.perf_counter()
+        auto_timings: dict[str, int] = {}
+        plan_started = time.perf_counter()
         plan = await self._plan_auto_route(
             subject_route=subject_route,
             augmented_question=augmented_question,
             timeout_s=timeout_s,
         )
+        auto_timings["autoPlanMs"] = int((time.perf_counter() - plan_started) * 1000)
+
+        def attach_auto_timings(payload: dict[str, Any]) -> dict[str, Any]:
+            payload["auto_timings"] = dict(auto_timings)
+            return payload
+
         auto_subjects = list(plan["auto_subjects"])
         deep_subjects = list(plan["deep_subjects"])
         requested_subjects = list(plan["requested_subjects"])
@@ -514,6 +538,7 @@ class ChatAutoOrchestrationMixin:
             )
             try:
                 instant_subject = auto_subjects[0]
+                instant_started = time.perf_counter()
                 instant_result = await auto._ask_instant_stream(
                     self._apply_answer_style_to_question(
                         augmented_question,
@@ -527,8 +552,17 @@ class ChatAutoOrchestrationMixin:
                     working_dir=self._subject_working_dir(instant_subject),
                     emit_text=emit_text,
                 )
+                auto_timings["instantTrialMs"] = int(
+                    (time.perf_counter() - instant_started) * 1000
+                )
             except asyncio.TimeoutError:
+                auto_timings["instantTrialMs"] = int(
+                    (time.perf_counter() - instant_started) * 1000
+                    if "instant_started" in locals()
+                    else 0
+                )
                 await self._cancel_background_task(secondary_result_task)
+                deep_started = time.perf_counter()
                 deep_result, deep_error = await self._run_auto_deep_stream(
                     user_question=user_question,
                     augmented_question=augmented_question,
@@ -539,9 +573,12 @@ class ChatAutoOrchestrationMixin:
                     response_language=response_language,
                     emit_text=emit_text,
                 )
+                auto_timings["deepsearchFallbackMs"] = int(
+                    (time.perf_counter() - deep_started) * 1000
+                )
                 if deep_result is None:
                     raise TimeoutError(deep_error)
-                return {
+                return attach_auto_timings({
                     "mode_used": "deepsearch",
                     "answer": str(deep_result.get("answer", "")).strip(),
                     "upgraded": True,
@@ -557,11 +594,12 @@ class ChatAutoOrchestrationMixin:
                     "instant_review": instant_review,
                     "elapsed_ms": str(int((time.perf_counter() - started) * 1000)),
                     "raw": {"deep": deep_result},
-                }
+                })
             except Exception:
                 await self._cancel_background_task(secondary_result_task)
                 raise
 
+            review_started = time.perf_counter()
             heur_sufficient, heur_reason = auto._instant_heuristic_assessment(instant_result)
             instant_review["heuristic"] = heur_reason
             review_sufficient: bool | None = None
@@ -618,6 +656,9 @@ class ChatAutoOrchestrationMixin:
                 upgrade_reason = (
                     f"评审不可用且启发式不确定: heur={heur_reason}, review={review_reason}"
                 )
+            auto_timings["instantReviewMs"] = int(
+                (time.perf_counter() - review_started) * 1000
+            )
 
             if need_upgrade and len(auto_subjects) > 1:
                 supplement_budget = max(
@@ -639,6 +680,10 @@ class ChatAutoOrchestrationMixin:
                         emit_text=emit_text,
                         secondary_result_task=secondary_result_task,
                     )
+                    if isinstance(supplemented.get("auto_timings"), dict):
+                        for key, value in supplemented["auto_timings"].items():
+                            if isinstance(value, int) and value >= 0:
+                                auto_timings[str(key)] = value
                     merged_answer = str(supplemented.get("answer", "")).strip()
                     merged_review_sufficient = supplemented.get("review_sufficient")
                     merged_review_reason = (
@@ -661,7 +706,7 @@ class ChatAutoOrchestrationMixin:
                         merged_review_sufficient is not False
                         and merged_heur_sufficient is not False
                     ):
-                        return {
+                        return attach_auto_timings({
                             "mode_used": "instant",
                             "answer": merged_answer,
                             "upgraded": False,
@@ -677,7 +722,7 @@ class ChatAutoOrchestrationMixin:
                             "instant_review": instant_review,
                             "elapsed_ms": str(int((time.perf_counter() - started) * 1000)),
                             "raw": {"instant": supplemented},
-                        }
+                        })
                     if merged_review_sufficient is False:
                         upgrade_reason = merged_review_reason
                     elif merged_heur_sufficient is False:
@@ -689,7 +734,7 @@ class ChatAutoOrchestrationMixin:
 
             if not need_upgrade:
                 await self._cancel_background_task(secondary_result_task)
-                return {
+                return attach_auto_timings({
                     "mode_used": "instant",
                     "answer": str(instant_result.get("answer", "")).strip(),
                     "upgraded": False,
@@ -705,12 +750,12 @@ class ChatAutoOrchestrationMixin:
                     "instant_review": instant_review,
                     "elapsed_ms": str(int((time.perf_counter() - started) * 1000)),
                     "raw": {"instant": instant_result},
-                }
+                })
 
             remaining = auto._remaining_seconds(started, timeout_s)
             if remaining <= 0:
                 await self._cancel_background_task(secondary_result_task)
-                return {
+                return attach_auto_timings({
                     "mode_used": "instant",
                     "answer": str(instant_result.get("answer", "")).strip(),
                     "upgraded": True,
@@ -726,9 +771,10 @@ class ChatAutoOrchestrationMixin:
                     "instant_review": instant_review,
                     "elapsed_ms": str(int((time.perf_counter() - started) * 1000)),
                     "raw": {"instant": instant_result},
-                }
+                })
 
             await self._cancel_background_task(secondary_result_task)
+            deep_started = time.perf_counter()
             deep_result, deep_error = await self._run_auto_deep_stream(
                 user_question=user_question,
                 augmented_question=augmented_question,
@@ -739,9 +785,12 @@ class ChatAutoOrchestrationMixin:
                 response_language=response_language,
                 emit_text=emit_text,
             )
+            auto_timings["deepsearchFallbackMs"] = int(
+                (time.perf_counter() - deep_started) * 1000
+            )
             if deep_result is None:
                 raise TimeoutError(deep_error)
-            return {
+            return attach_auto_timings({
                 "mode_used": "deepsearch",
                 "answer": str(deep_result.get("answer", "")).strip(),
                 "upgraded": True,
@@ -757,8 +806,9 @@ class ChatAutoOrchestrationMixin:
                 "instant_review": instant_review,
                 "elapsed_ms": str(int((time.perf_counter() - started) * 1000)),
                 "raw": {"deep": deep_result},
-            }
+            })
 
+        deep_started = time.perf_counter()
         deep_result, deep_error = await self._run_auto_deep_stream(
             user_question=user_question,
             augmented_question=augmented_question,
@@ -769,9 +819,12 @@ class ChatAutoOrchestrationMixin:
             response_language=response_language,
             emit_text=emit_text,
         )
+        auto_timings["deepsearchFallbackMs"] = int(
+            (time.perf_counter() - deep_started) * 1000
+        )
         if deep_result is None:
             raise TimeoutError(deep_error)
-        return {
+        return attach_auto_timings({
             "mode_used": "deepsearch",
             "answer": str(deep_result.get("answer", "")).strip(),
             "upgraded": False,
@@ -787,4 +840,4 @@ class ChatAutoOrchestrationMixin:
             "instant_review": instant_review,
             "elapsed_ms": str(int((time.perf_counter() - started) * 1000)),
             "raw": {"deep": deep_result},
-        }
+        })

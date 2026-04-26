@@ -11,10 +11,8 @@ from lightrag.utils import TiktokenTokenizer, Tokenizer, wrap_embedding_func_wit
 
 from agenticRAG.agentic_config import DEBUG, WORKING_DIR
 from agenticRAG.agentic_schema import (
-    AdaptiveQueryPlan,
     EvidenceCheck,
     QuestionComplexity,
-    SimpleQueryPlan,
     SubQuestionQueryPlan,
 )
 
@@ -22,8 +20,6 @@ llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 llm_subquestion_plan_struct = llm.with_structured_output(SubQuestionQueryPlan)
 llm_evidence_struct = llm.with_structured_output(EvidenceCheck)
 llm_complexity_struct = llm.with_structured_output(QuestionComplexity)
-llm_simple_plan_struct = llm.with_structured_output(SimpleQueryPlan)
-llm_adaptive_plan_struct = llm.with_structured_output(AdaptiveQueryPlan)
 
 rag_by_working_dir: dict[str, LightRAG] = {}
 rag_init_locks: dict[str, asyncio.Lock] = {}

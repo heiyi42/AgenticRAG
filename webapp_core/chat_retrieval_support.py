@@ -3,13 +3,21 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from . import auto_runtime as auto
 
 from agenticRAG.agentic_answer import run_question_plan_state
-from agenticRAG.agentic_nodes import build_final_answer_prompt
-from agenticRAG.agentic_runtime import get_rag, llm
+from agenticRAG.agentic_nodes import (
+    attach_subquestion_routes,
+    build_final_answer_prompt,
+    build_global_subquestion_plan,
+    build_subquery_tasks,
+    judge_subquestion_results,
+    prepare_subquestion_retry_plan,
+    query_subquestion_tasks,
+)
+from agenticRAG.agentic_runtime import get_rag, llm, use_rag_working_dir
 from agenticRAG.instant_answer import answer_instant, answer_instant_stream
 
 from . import config as cfg
@@ -313,6 +321,11 @@ class ChatRetrievalSupportMixin:
         routing_question: str | None = None,
         allowed_subject_ids: list[str] | None = None,
         response_language: str = "zh",
+        workflow_stage_callback: Callable[
+            [str, dict[str, Any]],
+            Awaitable[None],
+        ]
+        | None = None,
     ) -> dict[str, Any]:
         normalized_subject_ids = [
             subject_id
@@ -373,6 +386,72 @@ class ChatRetrievalSupportMixin:
                 ],
             }
 
+        async def emit_stage(stage: str, state: dict[str, Any]) -> None:
+            if workflow_stage_callback is None:
+                return
+            await workflow_stage_callback(stage, dict(state))
+
+        if workflow_stage_callback is not None:
+            state: dict[str, Any] = {
+                "question": question,
+                "requested_mode": "deepsearch",
+                "response_language": response_language,
+                "allowed_subject_ids": list(candidate_subject_ids),
+                "subject_working_dirs": dict(subject_working_dirs),
+            }
+            with use_rag_working_dir(None):
+                await emit_stage("deepsearch_plan_start", state)
+                state.update(await asyncio.to_thread(build_global_subquestion_plan, state))
+                await emit_stage("deepsearch_plan_end", state)
+
+                await emit_stage("deepsearch_subject_route_start", state)
+                routed_subjects: dict[str, dict[str, Any]] = {}
+                base_question = str(routing_question or question)
+                for item in state.get("sub_questions", []):
+                    if not isinstance(item, dict):
+                        continue
+                    sub_question_id = str(item.get("id", "") or "").strip()
+                    sub_question = str(item.get("question", "") or "").strip()
+                    if not sub_question_id or not sub_question:
+                        continue
+                    routed_subjects[sub_question_id] = await route_subquestion_subjects(
+                        sub_question=sub_question,
+                        original_question=base_question,
+                    )
+                state.update(
+                    await asyncio.to_thread(
+                        attach_subquestion_routes,
+                        state,
+                        routed_subjects,
+                    )
+                )
+                await emit_stage("deepsearch_subject_route_end", state)
+
+                state.update(await asyncio.to_thread(build_subquery_tasks, state))
+                while True:
+                    await emit_stage("deepsearch_retrieve_start", state)
+                    state.update(await query_subquestion_tasks(state))
+                    await emit_stage("deepsearch_retrieve_end", state)
+
+                    await emit_stage("deepsearch_review_start", state)
+                    state.update(await judge_subquestion_results(state))
+                    await emit_stage("deepsearch_review_end", state)
+
+                    if not bool(state.get("needs_retry")):
+                        await emit_stage("deepsearch_retry_skipped", state)
+                        break
+
+                    await emit_stage("deepsearch_retry_start", state)
+                    state.update(
+                        await asyncio.to_thread(
+                            prepare_subquestion_retry_plan,
+                            state,
+                        )
+                    )
+                    await emit_stage("deepsearch_retry_end", state)
+                    state.update(await asyncio.to_thread(build_subquery_tasks, state))
+            return state
+
         return await run_question_plan_state(
             question,
             requested_mode="deepsearch",
@@ -392,6 +471,11 @@ class ChatRetrievalSupportMixin:
         routing_question: str | None = None,
         response_language: str = "zh",
         emit_text: Callable[[str], None] | None = None,
+        workflow_stage_callback: Callable[
+            [str, dict[str, Any]],
+            Awaitable[None],
+        ]
+        | None = None,
     ) -> dict[str, Any]:
         safe_timeout = max(1, int(timeout_s))
         started = time.perf_counter()
@@ -401,18 +485,29 @@ class ChatRetrievalSupportMixin:
                 routing_question=routing_question,
                 allowed_subject_ids=allowed_subject_ids,
                 response_language=response_language,
+                workflow_stage_callback=workflow_stage_callback,
             )
+            planning_ms = int((time.perf_counter() - started) * 1000)
             elapsed = time.perf_counter() - started
             remaining = max(1, safe_timeout - int(elapsed))
             final_prompt = build_final_answer_prompt(state)
             if not str(final_prompt or "").strip():
                 raise ValueError("DeepSearch final answer prompt is empty")
+            if workflow_stage_callback is not None:
+                await workflow_stage_callback("answer_generate_start", dict(state))
+            answer_started = time.perf_counter()
             answer = await self._stream_llm_text(
                 llm_client=llm,
                 prompt=final_prompt,
                 timeout_s=remaining,
                 emit_text=emit_text,
             )
+            answer_ms = int((time.perf_counter() - answer_started) * 1000)
+            if workflow_stage_callback is not None:
+                await workflow_stage_callback(
+                    "answer_generate_end",
+                    {**state, "answer_ms": answer_ms},
+                )
 
         total_ms = int((time.perf_counter() - started) * 1000)
         return {
@@ -425,6 +520,13 @@ class ChatRetrievalSupportMixin:
                 "sub_questions": state.get("sub_questions", []),
                 "subquery_results": state.get("subquery_results", []),
                 "query_attempt": state.get("query_attempt", 0),
+                "planning_ms": str(planning_ms),
+                "answer_ms": str(answer_ms),
+                "insufficient_subquestion_ids": state.get(
+                    "insufficient_subquestion_ids",
+                    [],
+                ),
+                "needs_retry": bool(state.get("needs_retry", False)),
             },
         }
 

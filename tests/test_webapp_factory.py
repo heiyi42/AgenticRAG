@@ -56,6 +56,34 @@ class WebappFactoryTests(unittest.TestCase):
         self.assertTrue(state["prewarm_attempted"])
         self.assertTrue(state["prewarm_succeeded"])
 
+    def test_legacy_route_renders_old_template(self) -> None:
+        app = self.webapp.create_app()
+
+        response = app.test_client().get("/legacy")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("LightRAG Chat", response.get_data(as_text=True))
+
+    def test_graph_health_route_uses_graph_service(self) -> None:
+        app = self.webapp.create_app()
+        graph_service = self.webapp.get_graph_service(app)
+
+        with patch.object(
+            graph_service,
+            "health",
+            return_value={
+                "ok": True,
+                "configured": True,
+                "subjects": [],
+                "counts": {"Entity": 1},
+                "error": "",
+            },
+        ):
+            response = app.test_client().get("/api/graph/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["counts"]["Entity"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

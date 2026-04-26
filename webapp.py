@@ -2,20 +2,32 @@ from __future__ import annotations
 
 import atexit
 import time
+from pathlib import Path
 from threading import Lock
 
-from flask import Flask, Response, current_app, jsonify, render_template, request
+from flask import (
+    Flask,
+    Response,
+    current_app,
+    jsonify,
+    render_template,
+    request,
+    send_from_directory,
+)
 
 from agenticRAG.cli_utils import build_memory_factory
 from agenticRAG.short_memory import shutdown_shared_conversation_memories
 from webapp_core import config as cfg
 from webapp_core.async_runner import async_runner, run_async, submit_async
 from webapp_core.chat_service import ChatService
+from webapp_core.graph_service import Neo4jGraphService
 from webapp_core.session_store import SessionStore
 
 _STORE_EXT_KEY = "agenticrag.store"
 _CHAT_SERVICE_EXT_KEY = "agenticrag.chat_service"
+_GRAPH_SERVICE_EXT_KEY = "agenticrag.graph_service"
 _BOOTSTRAP_STATE_EXT_KEY = "agenticrag.bootstrap_state"
+_FRONTEND_DIST = Path(__file__).resolve().parent / "frontend" / "dist"
 
 _shared_cleanup_registered = False
 _shared_cleanup_lock = Lock()
@@ -38,6 +50,11 @@ def get_store(app: Flask | None = None) -> SessionStore:
 def get_chat_service(app: Flask | None = None) -> ChatService:
     target = app or current_app
     return target.extensions[_CHAT_SERVICE_EXT_KEY]
+
+
+def get_graph_service(app: Flask | None = None) -> Neo4jGraphService:
+    target = app or current_app
+    return target.extensions[_GRAPH_SERVICE_EXT_KEY]
 
 
 def _get_bootstrap_state(app: Flask) -> dict[str, object]:
@@ -92,7 +109,18 @@ def bootstrap_app(
 
 
 def home():
+    index_path = _FRONTEND_DIST / "index.html"
+    if index_path.exists():
+        return send_from_directory(_FRONTEND_DIST, "index.html")
     return render_template("chat.html")
+
+
+def legacy_home():
+    return render_template("chat.html")
+
+
+def frontend_asset(filename: str):
+    return send_from_directory(_FRONTEND_DIST / "assets", filename)
 
 
 def modes():
@@ -231,8 +259,65 @@ def chat_updates_stream():
     )
 
 
+def graph_health():
+    return jsonify(get_graph_service().health())
+
+
+def graph_search():
+    limit = request.args.get("limit", "8")
+    result = get_graph_service().search_entities(
+        subject_id=request.args.get("subject_id", ""),
+        query=request.args.get("q", ""),
+        limit=int(limit) if str(limit).isdigit() else 8,
+    )
+    status = 200 if result.get("ok", False) else 503
+    return jsonify(result), status
+
+
+def _payload_int(payload: dict[str, object], key: str, default: int) -> int:
+    try:
+        return int(payload.get(key, default) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def graph_local_subgraph():
+    payload = request.get_json(silent=True) or {}
+    result = get_graph_service().local_subgraph(
+        subject_ids=[
+            str(item)
+            for item in payload.get("subject_ids", payload.get("subjectIds", [])) or []
+        ],
+        query=str(payload.get("query", "") or ""),
+        center_entity_ids=[
+            str(item)
+            for item in payload.get(
+                "center_entity_ids",
+                payload.get("centerEntityIds", []),
+            )
+            or []
+        ],
+        depth=_payload_int(payload, "depth", 1),
+        limit=_payload_int(payload, "limit", 80),
+    )
+    status = 200 if result.get("ok", False) else 503
+    return jsonify(result), status
+
+
+def graph_entity_chunks(entity_id: str):
+    limit = request.args.get("limit", "6")
+    result = get_graph_service().entity_chunks(
+        entity_id=entity_id,
+        limit=int(limit) if str(limit).isdigit() else 6,
+    )
+    status = 200 if result.get("ok", False) else 503
+    return jsonify(result), status
+
+
 def _register_routes(app: Flask) -> None:
     app.add_url_rule("/", view_func=home, methods=["GET"])
+    app.add_url_rule("/legacy", view_func=legacy_home, methods=["GET"])
+    app.add_url_rule("/assets/<path:filename>", view_func=frontend_asset, methods=["GET"])
     app.add_url_rule("/api/modes", view_func=modes, methods=["GET"])
     app.add_url_rule("/api/chats", view_func=list_chats, methods=["GET"])
     app.add_url_rule("/api/chats", view_func=create_chat, methods=["POST"])
@@ -277,6 +362,18 @@ def _register_routes(app: Flask) -> None:
         view_func=chat_updates_stream,
         methods=["GET"],
     )
+    app.add_url_rule("/api/graph/health", view_func=graph_health, methods=["GET"])
+    app.add_url_rule("/api/graph/search", view_func=graph_search, methods=["GET"])
+    app.add_url_rule(
+        "/api/graph/local-subgraph",
+        view_func=graph_local_subgraph,
+        methods=["POST"],
+    )
+    app.add_url_rule(
+        "/api/graph/entity/<path:entity_id>/chunks",
+        view_func=graph_entity_chunks,
+        methods=["GET"],
+    )
 
 
 def create_app(
@@ -289,9 +386,12 @@ def create_app(
     app = Flask(__name__, template_folder="templates")
     store = SessionStore(_build_memory_factory())
     chat_service = ChatService(store, run_async, submit_async)
+    graph_service = Neo4jGraphService()
+    chat_service.graph_service = graph_service
 
     app.extensions[_STORE_EXT_KEY] = store
     app.extensions[_CHAT_SERVICE_EXT_KEY] = chat_service
+    app.extensions[_GRAPH_SERVICE_EXT_KEY] = graph_service
     app.extensions[_BOOTSTRAP_STATE_EXT_KEY] = {
         "lock": Lock(),
         "cleanup_registered": False,

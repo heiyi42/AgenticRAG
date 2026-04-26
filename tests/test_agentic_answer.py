@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 import unittest
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import agenticRAG.agentic_answer as agentic_answer_module
@@ -10,51 +9,9 @@ import agenticRAG.instant_answer as instant_answer_module
 
 
 class AgenticAnswerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_answer_question_builds_final_answer_without_graph(self) -> None:
-        with (
-            patch.object(
-                agentic_answer_module,
-                "run_question_plan_state",
-                new=AsyncMock(
-                    return_value={
-                        "requested_mode": "deepsearch",
-                        "query_results": [{"question": "Q1", "answer": "A1"}],
-                        "query_attempt": 0,
-                    }
-                ),
-            ) as mocked_runner,
-            patch.object(
-                agentic_answer_module,
-                "build_final_answer_prompt",
-                return_value="final prompt",
-            ) as mocked_prompt,
-            patch.object(
-                agentic_answer_module,
-                "llm",
-                SimpleNamespace(
-                    ainvoke=AsyncMock(return_value=SimpleNamespace(content="最终回答"))
-                ),
-            ),
-        ):
-            result = await agentic_answer_module.answer_question(
-                "测试问题",
-                thread_id="thread-1",
-                working_dir="/tmp/os",
-            )
-
-        mocked_runner.assert_awaited_once_with(
-            "测试问题",
-            requested_mode="deepsearch",
-            working_dir="/tmp/os",
-        )
-        mocked_prompt.assert_called_once_with(
-            {
-                "requested_mode": "deepsearch",
-                "query_results": [{"question": "Q1", "answer": "A1"}],
-                "query_attempt": 0,
-            }
-        )
-        self.assertEqual(result["final_answer"], "最终回答")
+    async def test_run_question_plan_state_requires_routed_deepsearch(self) -> None:
+        with self.assertRaisesRegex(ValueError, "routed DeepSearch"):
+            await agentic_answer_module.run_question_plan_state("测试问题")
 
     async def test_run_question_plan_state_retries_by_subquestion(self) -> None:
         query_rounds: list[int] = []

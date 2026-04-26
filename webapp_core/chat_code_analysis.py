@@ -134,6 +134,10 @@ class ChatCodeAnalysisMixin:
                 "mode_used": mode,
                 "answer": answer,
                 "request_kind": "code_analysis",
+                "message_details": {
+                    "kind": "code_analysis",
+                    "route": {"chain": "code_analysis"},
+                },
                 "route": {
                     "chain": "code_analysis",
                     "reason": str(code_candidate.get("trigger") or "compiler_unavailable"),
@@ -170,6 +174,10 @@ class ChatCodeAnalysisMixin:
             "mode_used": mode,
             "answer": answer,
             "request_kind": "code_analysis",
+            "message_details": {
+                "kind": "code_analysis",
+                "route": {"chain": "code_analysis"},
+            },
             "route": {
                 "chain": "code_analysis",
                 "reason": str(code_candidate.get("trigger") or "compiler"),

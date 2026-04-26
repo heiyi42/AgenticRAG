@@ -19,9 +19,18 @@ htmlcov/
 .venv/
 venv/
 env/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+frontend/tailwind.config.js
+frontend/tailwind.config.d.ts
 
 data/
 lib/
+tmp/
+output/
 
 codex_clang_probe.plist
 codex_probe_warn.plist

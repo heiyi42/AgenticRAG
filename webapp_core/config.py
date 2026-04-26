@@ -55,7 +55,7 @@ WEB_RETRIEVAL_GATE_MIN_CONFIDENCE = auto._clamp_confidence(
     os.getenv("WEB_RETRIEVAL_GATE_MIN_CONFIDENCE", "0.70")
 )
 WEB_RETRIEVAL_GATE_KB_THRESHOLD = auto._clamp_confidence(
-    os.getenv("WEB_RETRIEVAL_GATE_KB_THRESHOLD", "0.40")
+    os.getenv("WEB_RETRIEVAL_GATE_KB_THRESHOLD", "0.20")
 )
 WEB_RETRIEVAL_GATE_DIRECT_THRESHOLD = auto._clamp_confidence(
     os.getenv("WEB_RETRIEVAL_GATE_DIRECT_THRESHOLD", "0.90")

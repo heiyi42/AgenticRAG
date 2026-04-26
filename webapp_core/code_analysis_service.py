@@ -335,26 +335,6 @@ class CodeAnalysisService:
             text,
         )
 
-    async def analyze_message(
-        self,
-        message: str,
-        *,
-        timeout_s: int = 15,
-    ) -> dict[str, Any] | None:
-        candidate = self.extract_c_code_candidate(message)
-        if candidate is None:
-            return None
-
-        analysis = await self.analyze_code(candidate["code"], timeout_s=timeout_s)
-        analysis["detected"] = {
-            "language": candidate["language"],
-            "language_hint": candidate["language_hint"],
-            "strategy": candidate["strategy"],
-            "score": candidate["score"],
-            "truncated": candidate["truncated"],
-        }
-        return analysis
-
     async def analyze_code(self, code: str, *, timeout_s: int = 15) -> dict[str, Any]:
         safe_code = str(code or "").replace("\r\n", "\n").strip()
         if not safe_code:

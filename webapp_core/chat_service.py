@@ -118,6 +118,7 @@ class ChatService(
         )
         self.problem_tutoring_service = ProblemTutoringService(auto.auto_router_llm)
         self.subject_catalog = self._build_subject_catalog()
+        self.graph_service = None
         self._retrieval_gate_cache: dict[str, tuple[bool, float, str, float]] = {}
         self._retrieval_gate_cache_lock = Lock()
         self._event_subscribers: set[Any] = set()

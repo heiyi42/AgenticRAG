@@ -62,7 +62,7 @@ class ChatRoutingTests(unittest.TestCase):
 
     def test_score_route_need_retrieval_prefers_direct_answer(self) -> None:
         need_retrieval, route_tag = ChatService._score_route_need_retrieval(
-            kb_relevance=0.15,
+            kb_relevance=0.05,
             direct_answerability=0.92,
             model_need_retrieval=True,
         )

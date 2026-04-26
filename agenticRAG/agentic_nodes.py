@@ -20,10 +20,7 @@ from agenticRAG.agentic_config import (
 )
 from agenticRAG.agentic_runtime import (
     get_rag,
-    llm,
-    llm_adaptive_plan_struct,
     llm_evidence_struct,
-    llm_simple_plan_struct,
     llm_subquestion_plan_struct,
 )
 from agenticRAG.query_utils import (
@@ -32,10 +29,8 @@ from agenticRAG.query_utils import (
     normalize_exception_message,
 )
 from agenticRAG.agentic_schema import (
-    AdaptiveQueryPlan,
     EvidenceCheck,
     PLAN_MAX_ITEMS,
-    SimpleQueryPlan,
     State,
     SubQuestionQueryPlan,
 )
@@ -99,16 +94,6 @@ def _effective_strategy(state: State) -> str:
     return "deep"
 
 
-def _blank_plan_state() -> dict:
-    return {
-        "query_results": [],
-        "query_attempt": 0,
-        "needs_retry": False,
-        "insufficient_indices": [],
-        "query_total_ms": "0",
-    }
-
-
 def _normalize_plan_lengths(
     sub_questions: List[str],
     modes: List[str],
@@ -116,15 +101,11 @@ def _normalize_plan_lengths(
     chunk_topks: List[int],
     *,
     fallback_question: str,
-    force_single: bool = False,
 ) -> dict:
     questions = [str(item).strip() for item in sub_questions if str(item or "").strip()]
     if not questions:
         questions = [fallback_question]
-    if force_single:
-        questions = questions[:1]
-    else:
-        questions = questions[:PLAN_MAX_ITEMS]
+    questions = questions[:PLAN_MAX_ITEMS]
 
     count = max(1, len(questions))
     normalized_modes = [_normalize_mode(item) for item in modes[:count]]
@@ -147,171 +128,7 @@ def _normalize_plan_lengths(
         "query_modes": normalized_modes,
         "query_topks": normalized_topks,
         "query_chunk_topks": normalized_chunk_topks,
-        **_blank_plan_state(),
     }
-
-
-def _debug_print_plan(label: str, result: dict) -> None:
-    if not DEBUG:
-        return
-    print(f"\n[DEBUG] {label}：")
-    print(
-        "[DEBUG] strategy="
-        f"{result.get('effective_strategy', '')}, "
-        f"requested_mode={result.get('requested_mode', '')}, "
-        f"detected_complexity={result.get('question_complexity', '')}, "
-        f"reason={result.get('planning_reason', '')}"
-    )
-    for i, (sq, mode, top_k, chunk_top_k) in enumerate(
-        zip(
-            result.get("sub_questions", []),
-            result.get("query_modes", []),
-            result.get("query_topks", []),
-            result.get("query_chunk_topks", []),
-        ),
-        start=1,
-    ):
-        print(
-            f"[DEBUG] Q{i}: mode={mode}, top_k={top_k}, "
-            f"chunk_top_k={chunk_top_k} | {sq}"
-        )
-
-
-def build_simple_query_plan(state: State) -> dict:
-    q = state["question"]
-    requested_mode = _normalize_requested_mode(state)
-    prompt = (
-        "你是 GraphRAG 简单问题查询规划器。请给这个问题选择 mode、top_k、chunk_top_k。\n"
-        f"- mode 只能是 local/global/hybrid\n"
-        f"- top_k 范围 {MIN_TOP_K}~{MAX_TOP_K}\n"
-        f"- chunk_top_k 范围 {MIN_CHUNK_TOP_K}~{MAX_CHUNK_TOP_K}\n\n"
-        f"问题：{q}"
-    )
-    obj: SimpleQueryPlan = llm_simple_plan_struct.invoke(prompt)
-    top_k = _clamp_topk(obj.top_k)
-    chunk_top_k = _clamp_chunk_topk(obj.chunk_top_k)
-    result = {
-        "requested_mode": requested_mode,
-        "detected_complexity": "simple",
-        "question_complexity": "simple",
-        "effective_strategy": "simple",
-        "planning_reason": "simple planner",
-        "sub_questions": [q],
-        "query_modes": [_normalize_mode(obj.mode)],
-        "query_topks": [top_k],
-        "query_chunk_topks": [chunk_top_k],
-        **_blank_plan_state(),
-    }
-    _debug_print_plan("simple 查询规划结果", result)
-    return result
-
-
-def _normalize_subquestion_query_plan(
-    obj: SubQuestionQueryPlan | AdaptiveQueryPlan,
-    *,
-    fallback_question: str,
-    requested_mode: str,
-    detected_complexity: str,
-    effective_strategy: str,
-    planning_reason: str,
-    force_single: bool = False,
-) -> dict:
-    result = _normalize_plan_lengths(
-        list(obj.sub_questions),
-        list(obj.query_modes),
-        list(obj.query_topks),
-        list(obj.query_chunk_topks),
-        fallback_question=fallback_question,
-        force_single=force_single,
-    )
-    result.update(
-        {
-            "requested_mode": requested_mode,
-            "detected_complexity": detected_complexity,
-            "question_complexity": detected_complexity,
-            "effective_strategy": effective_strategy,
-            "planning_reason": planning_reason.strip(),
-        }
-    )
-    return result
-
-
-def build_subquestion_query_plan(state: State) -> dict:
-    q = state["question"]
-    requested_mode = _normalize_requested_mode(state)
-    prompt = (
-        "你是 GraphRAG 深度查询规划器。请先判断原问题需要几个检索子问题，"
-        "再为每个子问题分别设置 mode、top_k 和 chunk_top_k。\n"
-        "规则：\n"
-        "- 子问题数量为 1 到 5 个，通常优先 2 到 5 个；只有单个检索问题就足够时才返回 1 个\n"
-        "- 子问题要覆盖不同信息维度，且尽量写成完整疑问句\n"
-        "- 禁止为了凑数量拆出重复或弱相关的子问题\n"
-        "- 事实简单、实体明确：优先 local，top_k/chunk_top_k 较小\n"
-        "- 整体主题/关系脉络：优先 global\n"
-        "- 复杂综合问题：优先 hybrid\n"
-        "- mode 只能是 local/global/hybrid\n"
-        f"- top_k 必须是整数，范围 {MIN_TOP_K} 到 {MAX_TOP_K}\n"
-        f"- chunk_top_k 必须是整数，范围 {MIN_CHUNK_TOP_K} 到 {MAX_CHUNK_TOP_K}\n"
-        "- 输出字段数量必须保持一致，顺序一一对应。\n\n"
-        f"原问题：{q}"
-    )
-    obj: SubQuestionQueryPlan = llm_subquestion_plan_struct.invoke(prompt)
-    result = _normalize_subquestion_query_plan(
-        obj,
-        fallback_question=q,
-        requested_mode=requested_mode,
-        detected_complexity=str(state.get("detected_complexity", "") or "").strip(),
-        effective_strategy="deep",
-        planning_reason=(
-            "用户显式选择 deepsearch，跳过自动复杂度分类"
-            if requested_mode == "deepsearch"
-            else "deep planner"
-        ),
-    )
-    _debug_print_plan("deep 查询规划结果", result)
-    return result
-
-
-def build_auto_query_plan(state: State) -> dict:
-    q = state["question"]
-    prompt = (
-        "你是 GraphRAG 自适应查询规划器。请先判断问题是 simple 还是 complex，"
-        "再生成与复杂度匹配的检索计划。\n"
-        "规则：\n"
-        "- simple: 只返回 1 个检索问题，适合直接检索回答\n"
-        "- complex: 按信息维度拆成 2 到 5 个子问题，禁止凑数；如果你确信 1 个检索问题就够，也可以返回 1 个\n"
-        "- 子问题尽量写成完整疑问句，避免互相重复\n"
-        "- 事实简单、实体明确：优先 local，top_k/chunk_top_k 较小\n"
-        "- 整体主题/关系脉络：优先 global\n"
-        "- 复杂综合问题：优先 hybrid\n"
-        "- mode 只能是 local/global/hybrid\n"
-        f"- top_k 必须是整数，范围 {MIN_TOP_K} 到 {MAX_TOP_K}\n"
-        f"- chunk_top_k 必须是整数，范围 {MIN_CHUNK_TOP_K} 到 {MAX_CHUNK_TOP_K}\n"
-        "- 输出字段数量必须保持一致，顺序一一对应。\n\n"
-        f"原问题：{q}"
-    )
-    obj: AdaptiveQueryPlan = llm_adaptive_plan_struct.invoke(prompt)
-    complexity = obj.complexity
-    result = _normalize_subquestion_query_plan(
-        obj,
-        fallback_question=q,
-        requested_mode="auto",
-        detected_complexity=complexity,
-        effective_strategy="simple" if complexity == "simple" else "deep",
-        planning_reason=obj.reason,
-        force_single=complexity == "simple",
-    )
-    _debug_print_plan("auto 自适应查询规划结果", result)
-    return result
-
-
-def build_query_plan(state: State) -> dict:
-    requested_mode = _normalize_requested_mode(state)
-    if requested_mode == "instant":
-        return build_simple_query_plan({**state, "requested_mode": requested_mode})
-    if requested_mode == "deepsearch":
-        return build_subquestion_query_plan({**state, "requested_mode": requested_mode})
-    return build_auto_query_plan({**state, "requested_mode": "auto"})
 
 
 def _blank_subquery_plan_state() -> dict:
@@ -864,122 +681,6 @@ def prepare_subquestion_retry_plan(state: State) -> dict:
     }
 
 
-async def _query_subquestion(state: State, idx: int) -> Dict[str, str]:
-    t0 = time.perf_counter()
-    sub_questions = state.get("sub_questions", [])
-    query_modes = state.get("query_modes", [])
-    query_topks = state.get("query_topks", [])
-    query_chunk_topks = state.get("query_chunk_topks", [])
-    if idx >= len(sub_questions):
-        return build_query_result_row(
-            question_id=f"q{idx + 1}",
-            question="子问题缺失",
-            used_question="子问题缺失",
-            mode="hybrid",
-            top_k=DEFAULT_TOP_K,
-            chunk_top_k=DEFAULT_CHUNK_TOP_K,
-            answer="子问题缺失，未执行查询。",
-            query_status="failure",
-            query_message="子问题缺失",
-            query_failure_reason="missing_question",
-            sufficient="False",
-            judge_reason="子问题缺失",
-            rewritten_question="",
-            retries=state.get("query_attempt", 0),
-            trace="missing",
-            elapsed_ms=int((time.perf_counter() - t0) * 1000),
-        )
-
-    q = sub_questions[idx]
-    mode = query_modes[idx] if idx < len(query_modes) else "hybrid"
-    top_k = _clamp_topk(query_topks[idx]) if idx < len(query_topks) else DEFAULT_TOP_K
-    chunk_top_k = (
-        _clamp_chunk_topk(query_chunk_topks[idx])
-        if idx < len(query_chunk_topks)
-        else DEFAULT_CHUNK_TOP_K
-    )
-
-    if DEBUG:
-        print(
-            f"[DEBUG] 执行查询: idx={idx + 1}, attempt={state.get('query_attempt', 0) + 1}, "
-            f"mode={mode}, top_k={top_k}, chunk_top_k={chunk_top_k}, question={q}"
-        )
-
-    rag_obj = await get_rag()
-    query_resp = await rag_obj.aquery_llm(
-        q,
-        param=QueryParam(mode=mode, top_k=top_k, chunk_top_k=chunk_top_k),
-    )
-    status, message, failure_reason, ans = extract_query_response_fields(query_resp)
-
-    return build_query_result_row(
-        question_id=f"q{idx + 1}",
-        question=q,
-        used_question=q,
-        mode=mode,
-        top_k=top_k,
-        chunk_top_k=chunk_top_k,
-        answer=ans,
-        query_status=status,
-        query_message=message,
-        query_failure_reason=failure_reason,
-        sufficient="unknown",
-        judge_reason="",
-        rewritten_question="",
-        retries=state.get("query_attempt", 0),
-        trace=(
-            f"attempt={state.get('query_attempt', 0) + 1},mode={mode},"
-            f"top_k={top_k},chunk_top_k={chunk_top_k}"
-        ),
-        elapsed_ms=int((time.perf_counter() - t0) * 1000),
-    )
-
-
-async def query_subquestions(state: State) -> dict:
-    t0 = time.perf_counter()
-    count = len(state.get("sub_questions", []))
-    if count == 0:
-        return {"query_results": [], "query_total_ms": "0"}
-
-    await get_rag()
-    tasks = [_query_subquestion(state, idx) for idx in range(count)]
-    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    results: List[Dict[str, str]] = []
-    for idx, item in enumerate(raw_results):
-        if isinstance(item, Exception):
-            q = state["sub_questions"][idx] if idx < len(state["sub_questions"]) else "子问题缺失"
-            m = state["query_modes"][idx] if idx < len(state["query_modes"]) else "hybrid"
-            err_msg = normalize_exception_message(item)
-            results.append(
-                build_query_result_row(
-                    question_id=f"q{idx + 1}",
-                    question=q,
-                    used_question=q,
-                    mode=m,
-                    top_k=DEFAULT_TOP_K,
-                    chunk_top_k=DEFAULT_CHUNK_TOP_K,
-                    answer=f"查询失败: {err_msg}",
-                    query_status="failure",
-                    query_message=f"query 异常: {err_msg}",
-                    query_failure_reason="exception",
-                    sufficient="False",
-                    judge_reason="查询异常",
-                    rewritten_question="",
-                    retries=state.get("query_attempt", 0),
-                    trace="error",
-                    elapsed_ms=0,
-                )
-            )
-        else:
-            results.append(item)
-
-    total_ms = int((time.perf_counter() - t0) * 1000)
-    if DEBUG:
-        print(f"[DEBUG] query 节点总耗时: {total_ms} ms")
-    return {"query_results": results, "query_total_ms": str(total_ms)}
-
-
 async def _judge_evidence(original_q: str, used_q: str, answer: str) -> EvidenceCheck:
     prompt = (
         "你是检索质量评估器。请判断当前检索结果是否足够回答子问题。\n"
@@ -1034,125 +735,6 @@ def _rule_based_evidence(item: Dict[str, str]) -> tuple[bool | None, str]:
     if len(text) >= 260:
         return (True, "无结构化状态但答案长度充足，先视为充分")
     return (None, "无结构化状态，需 LLM 进一步评估")
-
-
-async def judge_query_results(state: State) -> dict:
-    query_results = state.get("query_results", [])
-    if not query_results:
-        return {"needs_retry": False, "insufficient_indices": []}
-
-    updated: List[Dict[str, str]] = []
-    insufficient_indices: List[int] = []
-    llm_tasks = []
-    llm_task_indices: List[int] = []
-
-    for idx, item in enumerate(query_results):
-        row = dict(item)
-        rule_ok, rule_reason = _rule_based_evidence(item)
-        if rule_ok is None:
-            llm_tasks.append(
-                _judge_evidence(
-                    item.get("question", ""),
-                    item.get("used_question", ""),
-                    item.get("answer", ""),
-                )
-            )
-            llm_task_indices.append(idx)
-            row["sufficient"] = "pending"
-            row["judge_reason"] = rule_reason
-            row["rewritten_question"] = ""
-        else:
-            row["sufficient"] = str(rule_ok)
-            row["judge_reason"] = rule_reason
-            row["rewritten_question"] = ""
-            if not rule_ok:
-                insufficient_indices.append(idx)
-        updated.append(row)
-
-    if llm_tasks:
-        raw_judges = await asyncio.gather(*llm_tasks, return_exceptions=True)
-        for idx, judge_item in zip(llm_task_indices, raw_judges):
-            row = updated[idx]
-            if isinstance(judge_item, Exception):
-                row["sufficient"] = "False"
-                row["judge_reason"] = f"评估异常: {judge_item}"
-                row["rewritten_question"] = ""
-                insufficient_indices.append(idx)
-            else:
-                sufficient = bool(judge_item.sufficient)
-                row["sufficient"] = str(sufficient)
-                row["judge_reason"] = judge_item.reason.strip()
-                row["rewritten_question"] = judge_item.rewritten_question.strip()
-                if not sufficient:
-                    insufficient_indices.append(idx)
-
-    attempt = int(state.get("query_attempt", 0))
-    allowed_retry = _allowed_retry_budget(state)
-    needs_retry = len(insufficient_indices) > 0 and attempt < allowed_retry
-    if DEBUG:
-        print(
-            f"[DEBUG] judge 结果: insufficient={insufficient_indices}, "
-            f"attempt={attempt}, allowed_retry={allowed_retry}, needs_retry={needs_retry}"
-        )
-    return {
-        "query_results": updated,
-        "insufficient_indices": insufficient_indices,
-        "needs_retry": needs_retry,
-    }
-
-
-def prepare_retry_plan(state: State) -> dict:
-    insufficient = state.get("insufficient_indices", [])
-    sub_questions = list(state.get("sub_questions", []))
-    query_modes = list(state.get("query_modes", []))
-    query_topks = list(state.get("query_topks", []))
-    query_chunk_topks = list(state.get("query_chunk_topks", []))
-    query_results = state.get("query_results", [])
-
-    scored = sorted(
-        [idx for idx in insufficient if idx < len(sub_questions)],
-        key=lambda i: len(sub_questions[i]),
-        reverse=True,
-    )
-    retry_targets = scored[: max(1, RETRY_MAX_ITEMS)] if scored else []
-
-    for idx in retry_targets:
-        if idx >= len(sub_questions):
-            continue
-        while len(query_modes) <= idx:
-            query_modes.append("hybrid")
-        while len(query_topks) <= idx:
-            query_topks.append(DEFAULT_TOP_K)
-        while len(query_chunk_topks) <= idx:
-            query_chunk_topks.append(DEFAULT_CHUNK_TOP_K)
-
-        item = query_results[idx] if idx < len(query_results) else {}
-        rewritten = str(item.get("rewritten_question", "")).strip()
-        if rewritten:
-            sub_questions[idx] = rewritten
-
-        query_modes[idx] = _next_mode(query_modes[idx])
-        query_topks[idx] = _clamp_topk(query_topks[idx] + TOPK_RETRY_STEP)
-        query_chunk_topks[idx] = _clamp_chunk_topk(
-            query_chunk_topks[idx] + CHUNK_TOPK_RETRY_STEP
-        )
-
-        if DEBUG:
-            print(
-                f"[DEBUG] retry 规划: idx={idx + 1}, mode={query_modes[idx]}, "
-                f"top_k={query_topks[idx]}, chunk_top_k={query_chunk_topks[idx]}, "
-                f"question={sub_questions[idx]}"
-            )
-
-    return {
-        "sub_questions": sub_questions,
-        "query_modes": query_modes,
-        "query_topks": query_topks,
-        "query_chunk_topks": query_chunk_topks,
-        "query_attempt": int(state.get("query_attempt", 0)) + 1,
-        "needs_retry": False,
-        "insufficient_indices": [],
-    }
 
 
 def _final_prompt_evidence_status(item: Dict[str, str]) -> str:
@@ -1229,37 +811,4 @@ def _build_final_answer_prompt_from_subquery_state(state: State) -> str:
 
 
 def build_final_answer_prompt(state: State) -> str:
-    if state.get("subquery_results") or any(
-        isinstance(item, dict) for item in state.get("sub_questions", [])
-    ):
-        return _build_final_answer_prompt_from_subquery_state(state)
-
-    lines = [f"原问题：{state['question']}"]
-    for i, item in enumerate(state["query_results"], start=1):
-        lines.append(f"子问题{i}：{item['question']}")
-        used_question = str(item.get("used_question", "")).strip()
-        if used_question and used_question != item["question"]:
-            lines.append(f"子问题{i}改写查询：{used_question}")
-        lines.append(f"子问题{i}证据充分性：{_final_prompt_evidence_status(item)}")
-        judge_reason = str(item.get("judge_reason", "")).strip()
-        if judge_reason:
-            lines.append(f"子问题{i}评估说明：{judge_reason}")
-        query_status = str(item.get("query_status", "")).strip()
-        if query_status and query_status.lower() != "success":
-            lines.append(f"子问题{i}检索状态：{query_status}")
-        query_failure_reason = str(item.get("query_failure_reason", "")).strip()
-        if query_failure_reason:
-            lines.append(f"子问题{i}失败原因：{query_failure_reason}")
-        lines.append(f"子问题{i}检索结果：{item['answer']}")
-    lines.append(f"query重试轮数：{state.get('query_attempt', 0)}")
-    prompt = (
-        "你是一个严谨的问答助手。请只基于给定子问题及其检索证据回答原问题。\n"
-        "输出要求：\n"
-        "1) 使用 Markdown 小节标题：### 结论 / ### 关键依据 / ### 不确定点 / ### 建议（可选）\n"
-        "2) 先给结论，再给关键依据；\n"
-        "3) 若某条证据不足或检索失败，必须在不确定点中明确说明；\n"
-        "4) 不要编造检索结果中没有的信息；\n"
-        "5) 表达尽量紧凑，避免重复复述子问题。\n\n"
-        + "\n".join(lines)
-    )
-    return prompt
+    return _build_final_answer_prompt_from_subquery_state(state)

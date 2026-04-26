@@ -35,4 +35,4 @@ py-modules = ["webapp"]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["agenticRAG*", "models*", "webapp_core*"]
+include = ["agenticRAG*", "webapp_core*"]

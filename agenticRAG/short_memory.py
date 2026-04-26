@@ -212,10 +212,6 @@ class ConversationSummaryMemory:
             self.recent_turns.clear()
             self._state_version += 1
 
-    def has_context(self) -> bool:
-        with self._lock:
-            return bool(self.summary.strip()) or bool(self.recent_turns)
-
     def snapshot_state(self) -> dict[str, Any]:
         with self._lock:
             safe_recent = [[q, a] for q, a in self.recent_turns]
